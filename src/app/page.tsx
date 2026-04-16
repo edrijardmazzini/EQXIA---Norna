@@ -1,9 +1,8 @@
 "use client"
-import { useState, useEffect, useMemo, useCallback } from "react"
+import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { AppHeader } from "@/components/layout/AppHeader"
-import { Button } from "@/components/ui/Button"
 import { Spinner } from "@/components/ui/Spinner"
 import { useTheme } from "@/hooks/useTheme"
 import {
@@ -14,15 +13,15 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Project {
-  name: string; status: string; type: string; methodology: string
+  id: string; name: string; status: string; type: string; methodology: string
   currency: string; quotedAmount: number; finalAmount: number
   winPercent: number; riskLevel: string; startDate: string; endDate: string
   rentabilite: number | null; netAmount: number | null; humanCost: number | null
-  clientName: string
+  clientName: string; clientSatisfaction?: string
 }
 
 interface Depense {
-  description: string; date: string; fournisseur: string
+  id: string; description: string; date: string; fournisseur: string
   categorie: string; sousCategorie: string; montant: number
   montantMUR: number; devise: string; dossier: string; payePar: string
 }
@@ -41,6 +40,15 @@ const PIE_CAT = ["#A6C9CE", "#7BB3BE", "#5A9DAE", "#3D8899", "#1E7085", "#2196A8
 const PIE_TYPE = ["#A6C9CE", "#7EC8A4", "#5BBFA0", "#3BAF8A", "#28A07A", "#1A9070", "#4CB896", "#7AD4B2", "#A3E5CD", "#C8F0E0"]
 const RISK_COLORS: Record<string, string> = { Low: "#22c55e", Medium: "#f97316", High: "#ef4444", Null: "#6b7280" }
 
+const STATUS_OPTIONS = ["Won", "Won orally", "Active", "Completed", "Lost", "Cancelled", "Pending", "Proposal"]
+const TYPE_OPTIONS = ["Consulting", "Training", "Internal", "Workshop", "Product", "Advisory"]
+const METHODOLOGY_OPTIONS = ["Agile", "Waterfall", "Hybrid", "Ad-hoc"]
+const CURRENCY_OPTIONS = ["MUR", "EUR", "USD", "GBP"]
+const RISK_OPTIONS = ["Low", "Medium", "High"]
+const SATISFACTION_OPTIONS = ["Very Satisfied", "Satisfied", "Neutral", "Unsatisfied"]
+const CATEGORIE_OPTIONS = Object.keys(CAT_COLORS)
+const DEVISE_OPTIONS = ["MUR", "EUR", "USD", "GBP"]
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -58,13 +66,26 @@ export default function DashboardPage() {
   const [topMode, setTopMode] = useState<"clients" | "fournisseurs">("clients")
   const [tableMode, setTableMode] = useState<"ventes" | "depenses">("ventes")
 
+  // Modal states
+  const [editProject, setEditProject] = useState<Project | null>(null)
+  const [editDepense, setEditDepense] = useState<Depense | null>(null)
+  const [showAddVente, setShowAddVente] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  // Filter states
+  const [venteFilters, setVenteFilters] = useState<Record<string, string>>({})
+  const [depenseFilters, setDepenseFilters] = useState<Record<string, string>>({})
+
   useEffect(() => { setBgImage(BG_IMAGES[Math.floor(Math.random() * BG_IMAGES.length)]) }, [])
-  useEffect(() => {
+
+  const fetchData = useCallback(() => {
     fetch("/api/dashboard").then(r => r.json()).then(data => {
       if (data.error) throw new Error(data.error)
       setProjects(data.projects || []); setDepenses(data.depenses || [])
     }).catch(e => setError(e.message)).finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => { fetchData() }, [fetchData])
 
   // ─── Computed ───────────────────────────────────────────────────────────────
 
@@ -127,7 +148,6 @@ export default function DashboardPage() {
     return Object.entries(m).filter(([n]) => n !== "Internal" && n !== "N/A").map(([name, v]) => ({ name, ...v })).sort((a, b) => b.amount - a.amount)
   }, [projects])
 
-  // Top fournisseurs / clients
   const topFourn = useMemo(() => {
     const m: Record<string, number> = {}
     depenses.forEach(d => { if (d.fournisseur) m[d.fournisseur] = (m[d.fournisseur] || 0) + d.montantMUR })
@@ -144,10 +164,13 @@ export default function DashboardPage() {
 
   const topData = topMode === "clients" ? topClients : topFourn
 
+  // Rentabilité: filter out Internal projects
   const rentaData = useMemo(() =>
-    projects.filter(p => p.finalAmount > 0 && p.rentabilite != null).map(p => ({
-      name: p.name, x: p.finalAmount, y: (p.rentabilite ?? 0) * 100, risk: p.riskLevel || "Null",
-    }))
+    projects
+      .filter(p => p.finalAmount > 0 && p.rentabilite != null && p.type !== "Internal")
+      .map(p => ({
+        name: p.name, x: p.finalAmount, y: (p.rentabilite ?? 0) * 100, risk: p.riskLevel || "Null",
+      }))
   , [projects])
 
   // Hero
@@ -162,12 +185,72 @@ export default function DashboardPage() {
   const heroTotalRev = useMemo(() => heroData.reduce((s, d) => s + d.revenus, 0), [heroData])
   const heroNet = heroTotalRev - heroTotalDep
 
-  // Table data
-  const dernieresDep = useMemo(() => [...depenses].sort((a, b) => (b.date || "").localeCompare(a.date || "")).slice(0, 8), [depenses])
-  const dernieresVentes = useMemo(() =>
+  // Table data — all items (no limit), with filters
+  const allVentes = useMemo(() =>
     projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status) && p.finalAmount > 0)
-      .sort((a, b) => (b.startDate || "").localeCompare(a.startDate || "")).slice(0, 8)
+      .sort((a, b) => (b.startDate || "").localeCompare(a.startDate || ""))
   , [projects])
+
+  const filteredVentes = useMemo(() => {
+    return allVentes.filter(p => {
+      if (venteFilters.date && !p.startDate?.includes(venteFilters.date)) return false
+      if (venteFilters.projet && !p.name.toLowerCase().includes(venteFilters.projet.toLowerCase())) return false
+      if (venteFilters.client && !p.clientName.toLowerCase().includes(venteFilters.client.toLowerCase())) return false
+      if (venteFilters.type && p.type !== venteFilters.type) return false
+      if (venteFilters.status && p.status !== venteFilters.status) return false
+      return true
+    })
+  }, [allVentes, venteFilters])
+
+  const allDep = useMemo(() =>
+    [...depenses].sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+  , [depenses])
+
+  const filteredDep = useMemo(() => {
+    return allDep.filter(d => {
+      if (depenseFilters.date && !d.date?.includes(depenseFilters.date)) return false
+      if (depenseFilters.description && !d.description.toLowerCase().includes(depenseFilters.description.toLowerCase())) return false
+      if (depenseFilters.fournisseur && !d.fournisseur.toLowerCase().includes(depenseFilters.fournisseur.toLowerCase())) return false
+      if (depenseFilters.categorie && d.categorie !== depenseFilters.categorie) return false
+      return true
+    })
+  }, [allDep, depenseFilters])
+
+  // ─── Save handlers ──────────────────────────────────────────────────────────
+
+  const handleSaveProject = useCallback(async (data: Partial<Project> & { id?: string }) => {
+    setSaving(true)
+    try {
+      const isNew = !data.id
+      const url = isNew ? "/api/projects" : `/api/projects/${data.id}`
+      const method = isNew ? "POST" : "PATCH"
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) })
+      if (!res.ok) throw new Error("Erreur lors de la sauvegarde")
+      setEditProject(null)
+      setShowAddVente(false)
+      setLoading(true)
+      fetchData()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }, [fetchData])
+
+  const handleSaveDepense = useCallback(async (data: Partial<Depense>) => {
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/depenses/${data.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) })
+      if (!res.ok) throw new Error("Erreur lors de la sauvegarde")
+      setEditDepense(null)
+      setLoading(true)
+      fetchData()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }, [fetchData])
 
   // ─── Loading ────────────────────────────────────────────────────────────────
 
@@ -188,7 +271,7 @@ export default function DashboardPage() {
       <div style={{ position: "fixed", inset: 0, background: "var(--bg-overlay)", zIndex: 0 }} />
       <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
 
-        <AppHeader appName="Plutus" right={<div style={{ display: "flex", gap: 8, alignItems: "center" }}><span style={{ color: "var(--accent)", fontSize: "var(--fs-xs)", fontWeight: 600, letterSpacing: "0.08em" }}>DASHBOARD</span><Button variant="ghost" size="sm" onClick={() => router.push("/shadcn")}>Shadcn</Button></div>} />
+        <AppHeader appName="Plutus" right={<span style={{ color: "var(--accent)", fontSize: "var(--fs-xs)", fontWeight: 600, letterSpacing: "0.08em" }}>DASHBOARD</span>} />
 
         <main style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 20px", width: "100%" }}>
 
@@ -372,41 +455,98 @@ export default function DashboardPage() {
           </div>
 
           {/* ── Table: Ventes / Dépenses ── */}
-          <ChartCard title={tableMode === "ventes" ? "Dernières ventes" : "Dernières dépenses"} expandable right={
-            <Seg value={tableMode} onChange={v => setTableMode(v as any)} options={[["ventes", "Ventes"], ["depenses", "Dépenses"]]} />
-          }>
-            {tableMode === "depenses" ? (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
-                <thead><tr style={{ borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
-                  {["Date", "Description", "Fournisseur", "Montant", "Catégorie"].map(h => <th key={h} style={thStyle}>{h}</th>)}
-                </tr></thead>
-                <tbody>{dernieresDep.map((d, i) => (
-                  <tr key={i} style={{ borderBottom: i < 7 ? "1px solid rgba(166,201,206,0.05)" : undefined }}>
-                    <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{d.date || "—"}</td>
-                    <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.description}</td>
-                    <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{d.fournisseur}</td>
-                    <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace" }}>{d.montant.toLocaleString("fr-FR")} {d.devise}</td>
-                    <td style={tdStyle}><span style={{ background: `${CAT_COLORS[d.categorie] || "#6b7280"}22`, color: CAT_COLORS[d.categorie] || "#6b7280", padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{d.categorie}</span></td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            ) : (
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
-                <thead><tr style={{ borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
-                  {["Date", "Projet", "Client", "Montant", "Type", "Status"].map(h => <th key={h} style={thStyle}>{h}</th>)}
-                </tr></thead>
-                <tbody>{dernieresVentes.map((p, i) => (
-                  <tr key={i} style={{ borderBottom: i < 7 ? "1px solid rgba(166,201,206,0.05)" : undefined }}>
-                    <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{p.startDate || "—"}</td>
-                    <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</td>
-                    <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName}</td>
-                    <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace" }}>{Math.round(p.finalAmount).toLocaleString("fr-FR")} {p.currency}</td>
-                    <td style={tdStyle}><span style={{ background: "var(--accent-soft)", color: "var(--accent)", padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{p.type}</span></td>
-                    <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status}</td>
-                  </tr>
-                ))}</tbody>
-              </table>
-            )}
+          <ChartCard
+            title={tableMode === "ventes" ? "Dernières ventes" : "Dernières dépenses"}
+            expandable
+            right={
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {tableMode === "ventes" && (
+                  <button
+                    onClick={() => setShowAddVente(true)}
+                    style={{
+                      background: "var(--btn-add-bg)", color: "var(--btn-add-color)", border: `1px solid var(--btn-add-border)`,
+                      borderRadius: 6, padding: "4px 12px", fontSize: "var(--fs-2xs)", fontWeight: 600,
+                      cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 4,
+                    }}
+                  >
+                    + Ajouter une vente
+                  </button>
+                )}
+                <Seg value={tableMode} onChange={v => setTableMode(v as any)} options={[["ventes", "Ventes"], ["depenses", "Dépenses"]]} />
+              </div>
+            }
+          >
+            <div style={{ maxHeight: 420, overflowY: "auto", overflowX: "auto" }}>
+              {tableMode === "depenses" ? (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+                  <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--bg-panel)" }}>
+                    <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
+                      {["Date", "Description", "Fournisseur", "Montant", "Catégorie"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                    </tr>
+                    <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.12)" }}>
+                      <th style={filterCellStyle}><input placeholder="YYYY-MM" value={depenseFilters.date || ""} onChange={e => setDepenseFilters(f => ({ ...f, date: e.target.value }))} style={filterInputStyle} /></th>
+                      <th style={filterCellStyle}><input placeholder="Rechercher..." value={depenseFilters.description || ""} onChange={e => setDepenseFilters(f => ({ ...f, description: e.target.value }))} style={filterInputStyle} /></th>
+                      <th style={filterCellStyle}><input placeholder="Rechercher..." value={depenseFilters.fournisseur || ""} onChange={e => setDepenseFilters(f => ({ ...f, fournisseur: e.target.value }))} style={filterInputStyle} /></th>
+                      <th style={filterCellStyle} />
+                      <th style={filterCellStyle}>
+                        <select value={depenseFilters.categorie || ""} onChange={e => setDepenseFilters(f => ({ ...f, categorie: e.target.value }))} style={filterInputStyle}>
+                          <option value="">Toutes</option>
+                          {CATEGORIE_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>{filteredDep.map((d, i) => (
+                    <tr key={d.id || i} onClick={() => setEditDepense(d)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{d.date || "—"}</td>
+                      <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.description}</td>
+                      <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{d.fournisseur}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace" }}>{d.montant.toLocaleString("fr-FR")} {d.devise}</td>
+                      <td style={tdStyle}><span style={{ background: `${CAT_COLORS[d.categorie] || "#6b7280"}22`, color: CAT_COLORS[d.categorie] || "#6b7280", padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{d.categorie}</span></td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+                  <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--bg-panel)" }}>
+                    <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
+                      {["Date", "Projet", "Client", "Montant", "Type", "Status"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                    </tr>
+                    <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.12)" }}>
+                      <th style={filterCellStyle}><input placeholder="YYYY-MM" value={venteFilters.date || ""} onChange={e => setVenteFilters(f => ({ ...f, date: e.target.value }))} style={filterInputStyle} /></th>
+                      <th style={filterCellStyle}><input placeholder="Rechercher..." value={venteFilters.projet || ""} onChange={e => setVenteFilters(f => ({ ...f, projet: e.target.value }))} style={filterInputStyle} /></th>
+                      <th style={filterCellStyle}><input placeholder="Rechercher..." value={venteFilters.client || ""} onChange={e => setVenteFilters(f => ({ ...f, client: e.target.value }))} style={filterInputStyle} /></th>
+                      <th style={filterCellStyle} />
+                      <th style={filterCellStyle}>
+                        <select value={venteFilters.type || ""} onChange={e => setVenteFilters(f => ({ ...f, type: e.target.value }))} style={filterInputStyle}>
+                          <option value="">Tous</option>
+                          {TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </th>
+                      <th style={filterCellStyle}>
+                        <select value={venteFilters.status || ""} onChange={e => setVenteFilters(f => ({ ...f, status: e.target.value }))} style={filterInputStyle}>
+                          <option value="">Tous</option>
+                          {STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>{filteredVentes.map((p, i) => (
+                    <tr key={p.id || i} onClick={() => setEditProject(p)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{p.startDate || "—"}</td>
+                      <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</td>
+                      <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName}</td>
+                      <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace" }}>{Math.round(p.finalAmount).toLocaleString("fr-FR")} {p.currency}</td>
+                      <td style={tdStyle}><span style={{ background: "var(--accent-soft)", color: "var(--accent)", padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{p.type}</span></td>
+                      <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              )}
+            </div>
+            <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", padding: "8px 16px", borderTop: "1px solid rgba(166,201,206,0.08)" }}>
+              {tableMode === "ventes" ? `${filteredVentes.length} vente(s)` : `${filteredDep.length} dépense(s)`}
+            </div>
           </ChartCard>
 
           <div style={{ textAlign: "center", padding: "12px 0 24px", color: "var(--text-muted)", fontSize: "var(--fs-2xs)" }}>{projects.length} projets · {depenses.length} dépenses · Données Notion en temps réel</div>
@@ -422,6 +562,34 @@ export default function DashboardPage() {
           ))}
         </div>
       </div>
+
+      {/* ── Modals ── */}
+      {editProject && (
+        <ProjectModal
+          project={editProject}
+          onClose={() => setEditProject(null)}
+          onSave={handleSaveProject}
+          saving={saving}
+        />
+      )}
+
+      {showAddVente && (
+        <ProjectModal
+          project={null}
+          onClose={() => setShowAddVente(false)}
+          onSave={handleSaveProject}
+          saving={saving}
+        />
+      )}
+
+      {editDepense && (
+        <DepenseModal
+          depense={editDepense}
+          onClose={() => setEditDepense(null)}
+          onSave={handleSaveDepense}
+          saving={saving}
+        />
+      )}
     </div>
   )
 }
@@ -431,6 +599,28 @@ export default function DashboardPage() {
 const card: React.CSSProperties = { background: "var(--bg-panel)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", border: "1px solid rgba(166,201,206,0.10)", borderRadius: 14, padding: "20px" }
 const thStyle: React.CSSProperties = { textAlign: "left", padding: "10px 16px", color: "var(--text-muted)", fontWeight: 500, fontSize: "var(--fs-2xs)", textTransform: "uppercase", letterSpacing: "0.05em" }
 const tdStyle: React.CSSProperties = { padding: "10px 16px", color: "var(--text-primary)" }
+const filterCellStyle: React.CSSProperties = { padding: "4px 8px" }
+const filterInputStyle: React.CSSProperties = {
+  width: "100%", padding: "4px 8px", fontSize: "var(--fs-2xs)",
+  background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)",
+  borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit", outline: "none",
+}
+const modalOverlay: React.CSSProperties = {
+  position: "fixed", inset: 0, zIndex: 1100,
+  background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)",
+  display: "flex", alignItems: "center", justifyContent: "center",
+  padding: 24, animation: "fade-in 0.2s ease",
+}
+const modalBox: React.CSSProperties = {
+  ...card, width: "90vw", maxWidth: 640, maxHeight: "90vh", overflowY: "auto",
+  padding: "28px 32px", boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
+}
+const fieldLabel: React.CSSProperties = { fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 500, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }
+const fieldInput: React.CSSProperties = {
+  width: "100%", padding: "8px 12px", fontSize: "var(--fs-sm)",
+  background: "var(--bg-input)", border: "1px solid var(--border-input)",
+  borderRadius: "var(--radius-input)", color: "var(--text-primary)", fontFamily: "inherit", outline: "none",
+}
 
 function KpiCard({ icon, iconBg, iconBorder, label, value, unit, sub, valueColor }: {
   icon: string; iconBg: string; iconBorder: string; label: string; value: string; unit: string; sub?: string; valueColor?: string
@@ -520,6 +710,227 @@ function ChartCard({ title, value, sub, right, children, expandable, expandMode 
     </div>
   )
 }
+
+// ─── Modals ───────────────────────────────────────────────────────────────────
+
+function ProjectModal({ project, onClose, onSave, saving }: {
+  project: Project | null; onClose: () => void; onSave: (data: any) => void; saving: boolean
+}) {
+  const isNew = !project
+  const [form, setForm] = useState({
+    name: project?.name || "",
+    status: project?.status || "Pending",
+    type: project?.type || "Consulting",
+    methodology: project?.methodology || "",
+    currency: project?.currency || "MUR",
+    quotedAmount: project?.quotedAmount || 0,
+    finalAmount: project?.finalAmount || 0,
+    winPercent: project?.winPercent || 0,
+    riskLevel: project?.riskLevel || "",
+    clientSatisfaction: project?.clientSatisfaction || "",
+    startDate: project?.startDate || "",
+    endDate: project?.endDate || "",
+  })
+
+  const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", h)
+    return () => document.removeEventListener("keydown", h)
+  }, [onClose])
+
+  return (
+    <div style={modalOverlay} onClick={onClose}>
+      <div style={modalBox} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "var(--text-primary)" }}>
+            {isNew ? "Nouvelle vente" : "Modifier la vente"}
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18 }}>✕</button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={fieldLabel}>Nom du projet</div>
+            <input value={form.name} onChange={e => set("name", e.target.value)} style={fieldInput} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Status</div>
+            <select value={form.status} onChange={e => set("status", e.target.value)} style={fieldInput}>
+              {STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={fieldLabel}>Type</div>
+            <select value={form.type} onChange={e => set("type", e.target.value)} style={fieldInput}>
+              {TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={fieldLabel}>Méthodologie</div>
+            <select value={form.methodology} onChange={e => set("methodology", e.target.value)} style={fieldInput}>
+              <option value="">—</option>
+              {METHODOLOGY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={fieldLabel}>Devise</div>
+            <select value={form.currency} onChange={e => set("currency", e.target.value)} style={fieldInput}>
+              {CURRENCY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={fieldLabel}>Montant devisé</div>
+            <input type="number" value={form.quotedAmount} onChange={e => set("quotedAmount", e.target.value)} style={fieldInput} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Montant final</div>
+            <input type="number" value={form.finalAmount} onChange={e => set("finalAmount", e.target.value)} style={fieldInput} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Win % (gut feeling)</div>
+            <input type="number" value={form.winPercent} onChange={e => set("winPercent", e.target.value)} style={fieldInput} min={0} max={100} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Niveau de risque</div>
+            <select value={form.riskLevel} onChange={e => set("riskLevel", e.target.value)} style={fieldInput}>
+              <option value="">—</option>
+              {RISK_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={fieldLabel}>Satisfaction client</div>
+            <select value={form.clientSatisfaction} onChange={e => set("clientSatisfaction", e.target.value)} style={fieldInput}>
+              <option value="">—</option>
+              {SATISFACTION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={fieldLabel}>Date de début</div>
+            <input type="date" value={form.startDate} onChange={e => set("startDate", e.target.value)} style={fieldInput} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Date de fin</div>
+            <input type="date" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={fieldInput} />
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 24 }}>
+          <button onClick={onClose} style={{ padding: "8px 20px", borderRadius: "var(--radius-btn)", background: "var(--btn-secondary-bg)", color: "var(--btn-secondary-text)", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "var(--fs-sm)", fontWeight: 500 }}>Annuler</button>
+          <button
+            onClick={() => onSave({ ...form, id: project?.id })}
+            disabled={saving || !form.name}
+            style={{
+              padding: "8px 20px", borderRadius: "var(--radius-btn)",
+              background: saving ? "var(--text-muted)" : "var(--btn-add-bg)",
+              color: "var(--btn-add-color)", border: "none", cursor: saving ? "wait" : "pointer",
+              fontFamily: "inherit", fontSize: "var(--fs-sm)", fontWeight: 600,
+            }}
+          >
+            {saving ? "Sauvegarde…" : isNew ? "Créer" : "Enregistrer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DepenseModal({ depense, onClose, onSave, saving }: {
+  depense: Depense; onClose: () => void; onSave: (data: any) => void; saving: boolean
+}) {
+  const [form, setForm] = useState({
+    description: depense.description,
+    date: depense.date,
+    fournisseur: depense.fournisseur,
+    categorie: depense.categorie,
+    sousCategorie: depense.sousCategorie,
+    montant: depense.montant,
+    devise: depense.devise,
+    dossier: depense.dossier,
+  })
+
+  const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", h)
+    return () => document.removeEventListener("keydown", h)
+  }, [onClose])
+
+  return (
+    <div style={modalOverlay} onClick={onClose}>
+      <div style={modalBox} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "var(--text-primary)" }}>Modifier la dépense</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18 }}>✕</button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={fieldLabel}>Description</div>
+            <input value={form.description} onChange={e => set("description", e.target.value)} style={fieldInput} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Date</div>
+            <input type="date" value={form.date} onChange={e => set("date", e.target.value)} style={fieldInput} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Fournisseur</div>
+            <input value={form.fournisseur} onChange={e => set("fournisseur", e.target.value)} style={fieldInput} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Catégorie</div>
+            <select value={form.categorie} onChange={e => set("categorie", e.target.value)} style={fieldInput}>
+              <option value="">—</option>
+              {CATEGORIE_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={fieldLabel}>Sous-catégorie</div>
+            <input value={form.sousCategorie} onChange={e => set("sousCategorie", e.target.value)} style={fieldInput} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Montant</div>
+            <input type="number" value={form.montant} onChange={e => set("montant", e.target.value)} style={fieldInput} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Devise</div>
+            <select value={form.devise} onChange={e => set("devise", e.target.value)} style={fieldInput}>
+              {DEVISE_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={fieldLabel}>Dossier</div>
+            <input value={form.dossier} onChange={e => set("dossier", e.target.value)} style={fieldInput} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Payé par</div>
+            <input value={depense.payePar} disabled style={{ ...fieldInput, opacity: 0.5 }} />
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 12, marginTop: 24 }}>
+          <button onClick={onClose} style={{ padding: "8px 20px", borderRadius: "var(--radius-btn)", background: "var(--btn-secondary-bg)", color: "var(--btn-secondary-text)", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "var(--fs-sm)", fontWeight: 500 }}>Annuler</button>
+          <button
+            onClick={() => onSave({ ...form, id: depense.id })}
+            disabled={saving}
+            style={{
+              padding: "8px 20px", borderRadius: "var(--radius-btn)",
+              background: saving ? "var(--text-muted)" : "var(--btn-add-bg)",
+              color: "var(--btn-add-color)", border: "none", cursor: saving ? "wait" : "pointer",
+              fontFamily: "inherit", fontSize: "var(--fs-sm)", fontWeight: 600,
+            }}
+          >
+            {saving ? "Sauvegarde…" : "Enregistrer"}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Chart sub-components ─────────────────────────────────────────────────────
 
 function Badge({ c, l, v }: { c: string; l: string; v: string }) {
   return <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: c }} /><span style={{ color: "var(--text-muted)" }}>{l}</span><span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "monospace" }}>{v}</span></span>

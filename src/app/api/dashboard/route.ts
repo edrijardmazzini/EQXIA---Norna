@@ -110,6 +110,7 @@ export async function GET() {
     const projects = projectsRaw.map((p: any) => {
       const props = p.properties
       return {
+        id: p.id,
         name: getText(props["Name"]),
         status: getSelect(props["Status"]),
         type: getSelect(props["Type"]),
@@ -137,6 +138,7 @@ export async function GET() {
       const payeParName = payeParIds.length > 0 ? (employeesMap[payeParIds[0]] || "Inconnu") : "Non attribué"
 
       return {
+        id: d.id,
         description: getText(props["Description"]),
         date: getDate(props["Date"]),
         fournisseur: getText(props["Fournisseur"]),
