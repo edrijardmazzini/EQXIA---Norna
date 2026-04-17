@@ -31,7 +31,7 @@ function LoginContent() {
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundImage: `url(${bgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', fontFamily: '"Inter","Calibri",Arial,sans-serif' }}>
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }} />
       <div style={{ position: 'relative', zIndex: 1, textAlign: 'center', maxWidth: 360, padding: 40 }}>
-        <img src="/assets/logos/eqxia-logo-teal-transparent.png" alt="EQXIA" style={{ height: 48, marginBottom: 16 }} />
+        <img src="/assets/logos/eqxia-logo-teal-transparent.png" alt="EQXIA" style={{ height: 160, marginBottom: 28, display: 'block', marginLeft: 'auto', marginRight: 'auto' }} />
         <div style={{ color: '#d0e1e2', fontSize: 28, fontWeight: 800, letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: 6 }}>Plutus</div>
         <div style={{ color: '#87A0A4', fontSize: 13, marginBottom: 32 }}>Dashboard financier</div>
         {error && (

@@ -1,12 +1,12 @@
 "use client"
 import { useState, useEffect, useMemo, useCallback, useRef } from "react"
-import { useSession } from "next-auth/react"
+import { useSession, signOut } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { AppHeader } from "@/components/layout/AppHeader"
 import { useTheme } from "@/hooks/useTheme"
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine,
+  PieChart, Pie, Cell, AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, Legend,
 } from "recharts"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,7 +58,7 @@ const DEVISE_OPTIONS = ["MUR", "EUR", "USD", "GBP"]
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
-  const { status } = useSession()
+  const { data: session, status } = useSession()
   const { mode, setTheme } = useTheme()
   const router = useRouter()
   const [projects, setProjects] = useState<Project[]>([])
@@ -68,7 +68,9 @@ export default function DashboardPage() {
   const [themeOpen, setThemeOpen] = useState(false)
   const [bgImage, setBgImage] = useState(BG_IMAGES[0])
   const [timeRange, setTimeRange] = useState<"all" | "12m" | "6m" | "3m">("all")
-  const [depPeriod, setDepPeriod] = useState<"year" | "quarter" | "month">("year")
+  const [depPeriod, setDepPeriod] = useState<"all" | "year" | "quarter" | "month">("year")
+  const [revPeriod, setRevPeriod] = useState<"all" | "year" | "quarter" | "month">("year")
+  const [revMode, setRevMode] = useState<"total" | "types">("total")
   const [topMode, setTopMode] = useState<"clients" | "fournisseurs">("clients")
   const [tableMode, setTableMode] = useState<"ventes" | "depenses">("ventes")
 
@@ -103,19 +105,39 @@ export default function DashboardPage() {
   const currentQuarter = Math.ceil((now.getMonth() + 1) / 3)
   const quarterStart = `${currentYear}${String((currentQuarter - 1) * 3 + 1).padStart(2, "0")}`
 
+  // Helper: dossier-YYMM depuis une date startDate (string ISO)
+  const dossierFromDate = (iso: string): string => {
+    if (!iso) return ""
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return ""
+    return `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+  }
+
   const depFiltered = useMemo(() => {
+    if (depPeriod === "all") return depenses
     if (depPeriod === "month") return depenses.filter(d => d.dossier === currentDossier)
     if (depPeriod === "quarter") return depenses.filter(d => d.dossier >= quarterStart && d.dossier <= currentDossier)
     return depenses.filter(d => d.dossier.startsWith(currentYear))
   }, [depenses, depPeriod, currentDossier, currentYear, quarterStart])
 
+  const revFilteredProjects = useMemo(() => {
+    const wonProjects = projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status))
+    if (revPeriod === "all") return wonProjects
+    if (revPeriod === "month") return wonProjects.filter(p => dossierFromDate(p.startDate) === currentDossier)
+    if (revPeriod === "quarter") return wonProjects.filter(p => { const k = dossierFromDate(p.startDate); return k >= quarterStart && k <= currentDossier })
+    return wonProjects.filter(p => dossierFromDate(p.startDate).startsWith(currentYear))
+  }, [projects, revPeriod, currentDossier, currentYear, quarterStart])
+
   const depTotal = useMemo(() => depFiltered.reduce((s, d) => s + d.montantMUR, 0), [depFiltered])
-  const revTotal = useMemo(() => projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).reduce((s, p) => s + toMUR(p.finalAmount, p.currency), 0), [projects])
+  const revTotalAll = useMemo(() => projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).reduce((s, p) => s + toMUR(p.finalAmount, p.currency), 0), [projects])
+  const revTotal = useMemo(() => revFilteredProjects.reduce((s, p) => s + toMUR(p.finalAmount, p.currency), 0), [revFilteredProjects])
   const totalProfit = revTotal - depTotal
   const avgMargin = revTotal > 0 ? ((totalProfit / revTotal) * 100) : 0
   const projetsActifs = useMemo(() => projects.filter(p => p.status === "Active").length, [projects])
   const projetsTotal = useMemo(() => projects.filter(p => !["Lost", "Cancelled"].includes(p.status)).length, [projects])
-  const depPeriodLabel = depPeriod === "year" ? `20${currentYear}` : depPeriod === "quarter" ? `T${currentQuarter} 20${currentYear}` : fmtDossier(currentDossier)
+  const periodLabel = (p: "all" | "year" | "quarter" | "month") => p === "all" ? "Depuis toujours" : p === "year" ? `20${currentYear}` : p === "quarter" ? `T${currentQuarter} 20${currentYear}` : fmtDossier(currentDossier)
+  const depPeriodLabel = periodLabel(depPeriod)
+  const revPeriodLabel = periodLabel(revPeriod)
 
   // Charts data
   const depParMois = useMemo(() => {
@@ -141,6 +163,32 @@ export default function DashboardPage() {
     const allKeys = new Set([...Object.keys(revMap), ...Object.keys(depMap)])
     return [...allKeys].sort().map(k => ({ mois: k, label: fmtDossier(k), revenus: revMap[k] || 0, depenses: depMap[k] || 0 }))
   }, [projects, depenses])
+
+  // Revenus par mois ventilés par type de projet (hors Internal pour cohérence avec "Par type de projet")
+  const revParMoisParType = useMemo(() => {
+    const byMois: Record<string, Record<string, number>> = {}
+    const typesSet = new Set<string>()
+    projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status) && p.finalAmount > 0).forEach(p => {
+      if (!p.startDate) return
+      const d = new Date(p.startDate)
+      const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+      const type = p.type || "N/A"
+      if (type === "Internal" || type === "N/A") return
+      if (!byMois[k]) byMois[k] = {}
+      byMois[k][type] = (byMois[k][type] || 0) + toMUR(p.finalAmount, p.currency)
+      typesSet.add(type)
+    })
+    const keys = Object.keys(byMois).sort()
+    const types = [...typesSet]
+    return {
+      types,
+      data: keys.map(k => {
+        const row: Record<string, number | string> = { mois: k, label: fmtDossier(k) }
+        types.forEach(t => { row[t] = byMois[k][t] || 0 })
+        return row
+      }),
+    }
+  }, [projects])
 
   const depListByDossier = useMemo(() => {
     const m: Record<string, Depense[]> = {}
@@ -171,19 +219,36 @@ export default function DashboardPage() {
     return Object.entries(m).filter(([n]) => n !== "Internal" && n !== "N/A").map(([name, v]) => ({ name, ...v })).sort((a, b) => b.amount - a.amount)
   }, [projects])
 
-  const topFourn = useMemo(() => {
-    const m: Record<string, number> = {}
-    depenses.forEach(d => { if (d.fournisseur) m[d.fournisseur] = (m[d.fournisseur] || 0) + d.montantMUR })
-    return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8)
+  const allFourn = useMemo(() => {
+    // Pour chaque fournisseur: total + catégorie dominante (max en MUR) + nb de dépenses
+    const m: Record<string, { value: number; catTotals: Record<string, number>; count: number }> = {}
+    depenses.forEach(d => {
+      if (!d.fournisseur) return
+      if (!m[d.fournisseur]) m[d.fournisseur] = { value: 0, catTotals: {}, count: 0 }
+      m[d.fournisseur].value += d.montantMUR
+      m[d.fournisseur].count += 1
+      if (d.categorie) m[d.fournisseur].catTotals[d.categorie] = (m[d.fournisseur].catTotals[d.categorie] || 0) + d.montantMUR
+    })
+    return Object.entries(m).map(([name, v]) => {
+      const topCat = Object.entries(v.catTotals).sort((a, b) => b[1] - a[1])[0]?.[0] || ""
+      return { name, value: v.value, categorie: topCat, count: v.count, color: CAT_COLORS[topCat] || "#6b7280" }
+    }).sort((a, b) => b.value - a.value)
   }, [depenses])
 
-  const topClients = useMemo(() => {
-    const m: Record<string, number> = {}
+  const topFourn = useMemo(() => allFourn.slice(0, 8), [allFourn])
+
+  const allClients = useMemo(() => {
+    const m: Record<string, { value: number; count: number; projects: Project[] }> = {}
     projects.filter(p => !["Lost", "Cancelled"].includes(p.status) && p.clientName && p.clientName !== "N/A").forEach(p => {
-      m[p.clientName] = (m[p.clientName] || 0) + toMUR(p.finalAmount, p.currency)
+      if (!m[p.clientName]) m[p.clientName] = { value: 0, count: 0, projects: [] }
+      m[p.clientName].value += toMUR(p.finalAmount, p.currency)
+      m[p.clientName].count += 1
+      m[p.clientName].projects.push(p)
     })
-    return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8)
+    return Object.entries(m).map(([name, v]) => ({ name, value: v.value, count: v.count, projects: v.projects })).sort((a, b) => b.value - a.value)
   }, [projects])
+
+  const topClients = useMemo(() => allClients.slice(0, 8), [allClients])
 
   const topData = topMode === "clients" ? topClients : topFourn
 
@@ -299,7 +364,7 @@ export default function DashboardPage() {
       <div style={{ position: "fixed", inset: 0, background: "var(--bg-overlay)", zIndex: 0 }} />
       <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
 
-        <AppHeader appName="Plutus" right={<span style={{ color: "var(--accent)", fontSize: "var(--fs-xs)", fontWeight: 600, letterSpacing: "0.08em" }}>DASHBOARD</span>} />
+        <AppHeader appName="Plutus" right={<SignOutButton />} />
 
         <main style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 20px", width: "100%" }}>
 
@@ -307,8 +372,23 @@ export default function DashboardPage() {
 
           {/* ── KPIs ── */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
-            <KpiCard icon="💰" iconBg="rgba(166,201,206,0.15)" iconBorder="rgba(166,201,206,0.3)" label="Total Profit" value={`${Math.round(totalProfit).toLocaleString("fr-FR")}`} unit="MUR" sub={depPeriodLabel} valueColor={totalProfit >= 0 ? "var(--accent)" : "var(--color-error)"} />
-            <KpiCard icon="📉" iconBg="rgba(166,201,206,0.15)" iconBorder="rgba(166,201,206,0.3)" label="Average Margin" value={`${avgMargin.toFixed(1)}%`} unit="" sub={depPeriodLabel} valueColor={avgMargin >= 0 ? "var(--accent)" : "var(--color-error)"} />
+            {/* Revenus card with toggle */}
+            <div style={card}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>Revenus</div>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(166,201,206,0.15)", border: "1px solid rgba(166,201,206,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>💰</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)", letterSpacing: "-0.03em", lineHeight: 1 }}>{Math.round(revTotal).toLocaleString("fr-FR")}</span>
+                <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>MUR</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{revPeriodLabel}</div>
+                <Seg value={revPeriod} onChange={v => setRevPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
+              </div>
+            </div>
+
+            <KpiCard icon="📉" iconBg="rgba(166,201,206,0.15)" iconBorder="rgba(166,201,206,0.3)" label="Average Margin" value={`${avgMargin.toFixed(1)}%`} unit="" sub={`Rev ${revPeriodLabel} · Dép ${depPeriodLabel}`} valueColor={avgMargin >= 0 ? "var(--accent)" : "var(--color-error)"} />
 
             {/* Dépenses card with toggle */}
             <div style={card}>
@@ -322,7 +402,7 @@ export default function DashboardPage() {
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{depPeriodLabel}</div>
-                <Seg value={depPeriod} onChange={v => setDepPeriod(v as any)} options={[["year", "A"], ["quarter", "T"], ["month", "M"]]} />
+                <Seg value={depPeriod} onChange={v => setDepPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
               </div>
             </div>
 
@@ -386,7 +466,20 @@ export default function DashboardPage() {
               </ResponsiveContainer>
             </ChartCard>
 
-            <ChartCard title="Par catégorie" expandable expandMode="tall">
+            <ChartCard
+              title="Par catégorie"
+              expandable
+              expandMode="tall"
+              renderExpanded={() => (
+                <BigPie
+                  data={depParCat}
+                  colors={depParCat.map(d => CAT_COLORS[d.name] || PIE_CAT[0])}
+                  total={depTotal}
+                  totalLabel="Dépenses totales"
+                  formatter={v => `${Math.round(v).toLocaleString("fr-FR")} MUR`}
+                />
+              )}
+            >
               <ResponsiveContainer width="100%" height={320}>
                 <PieChart>
                   <Pie data={depParCat} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={2} strokeWidth={0}
@@ -410,54 +503,64 @@ export default function DashboardPage() {
 
           {/* ── Row 2: Revenus mensuels + Par type double donut ── */}
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16 }}>
-            <ChartCard title="Revenus mensuels" sub="Clic sur un mois pour voir les ventes détaillées" value={`${Math.round(revTotal).toLocaleString("fr-FR")} MUR`} expandable>
+            <ChartCard
+              title="Revenus mensuels"
+              sub="Clic sur le graphe pour voir les ventes détaillées"
+              value={`${Math.round(revTotalAll).toLocaleString("fr-FR")} MUR`}
+              expandable
+              right={<Seg value={revMode} onChange={v => setRevMode(v as any)} options={[["total", "Total"], ["types", "Par types"]]} />}
+            >
               <div
                 onClick={() => { if (revenueHoverMois) setRevenueDetailMois(revenueHoverMois) }}
-                style={{ cursor: revenueHoverMois ? "pointer" : "default" }}
+                style={{ cursor: "pointer" }}
               >
                 <ResponsiveContainer width="100%" height={280}>
                   <AreaChart
-                    data={revParMois}
+                    data={revMode === "types" ? revParMoisParType.data : revParMois}
                     onMouseMove={(e: any) => {
                       const code = e?.activePayload?.[0]?.payload?.mois
                       if (code && code !== revenueHoverMois) setRevenueHoverMois(code)
                     }}
-                    onMouseLeave={() => setRevenueHoverMois(null)}
-                    onClick={(e: any) => {
-                      const code = e?.activePayload?.[0]?.payload?.mois
-                      if (code) setRevenueDetailMois(code)
-                    }}
                   >
-                    <defs><linearGradient id="gRev2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A6C9CE" stopOpacity={0.4} /><stop offset="100%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient></defs>
+                    <defs>
+                      <linearGradient id="gRev2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A6C9CE" stopOpacity={0.4} /><stop offset="100%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient>
+                      {revParMoisParType.types.map((t, i) => {
+                        const color = PIE_TYPE[i % PIE_TYPE.length]
+                        return <linearGradient key={t} id={`gRevType${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.5} /><stop offset="100%" stopColor={color} stopOpacity={0.05} /></linearGradient>
+                      })}
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
                     <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                     <Tooltip content={<RevenueTooltip ventesListByMois={ventesListByMois} />} />
-                    <Area
-                      type="monotone"
-                      dataKey="revenus"
-                      stroke="#A6C9CE"
-                      strokeWidth={2}
-                      fill="url(#gRev2)"
-                      dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }}
-                      activeDot={{
-                        r: 6,
-                        fill: "#A6C9CE",
-                        stroke: "var(--bg-card)",
-                        strokeWidth: 2,
-                        style: { cursor: "pointer" },
-                        onClick: (_: any, e: any) => {
-                          e?.stopPropagation?.()
-                          if (revenueHoverMois) setRevenueDetailMois(revenueHoverMois)
-                        },
-                      }}
-                    />
+                    {revMode === "total" ? (
+                      <Area type="monotone" dataKey="revenus" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev2)" dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#A6C9CE", strokeWidth: 0 }} />
+                    ) : (
+                      revParMoisParType.types.map((t, i) => (
+                        <Area key={t} type="monotone" dataKey={t} stackId="revtypes" stroke={PIE_TYPE[i % PIE_TYPE.length]} strokeWidth={1} fill={`url(#gRevType${i})`} />
+                      ))
+                    )}
+                    {revMode === "types" && <Legend wrapperStyle={{ fontSize: 10 }} iconType="circle" />}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
             </ChartCard>
 
-            <ChartCard title="Par type de projet" expandable expandMode="tall">
+            <ChartCard
+              title="Par type de projet"
+              expandable
+              expandMode="tall"
+              renderExpanded={() => (
+                <BigPie
+                  data={projParTypeFiltered}
+                  colors={projParTypeFiltered.map((_, i) => PIE_TYPE[i % PIE_TYPE.length])}
+                  total={projParTypeFiltered.reduce((s, e) => s + e.amount, 0)}
+                  totalLabel="Revenus totaux"
+                  formatter={v => `${Math.round(v).toLocaleString("fr-FR")} MUR`}
+                  double
+                />
+              )}
+            >
               <div style={{ position: "relative" }}>
                 <ResponsiveContainer width="100%" height={320}>
                   <PieChart>
@@ -490,16 +593,34 @@ export default function DashboardPage() {
 
           {/* ── Row 3: Top fournisseurs/clients + Rentabilité ── */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
-            <ChartCard title={topMode === "clients" ? "Top Clients" : "Top Fournisseurs"} right={<Seg value={topMode} onChange={v => setTopMode(v as any)} options={[["clients", "Clients"], ["fournisseurs", "Fournisseurs"]]} />}>
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={topData} layout="vertical" margin={{ left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
-                  <XAxis type="number" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-                  <YAxis type="category" dataKey="name" tick={{ fill: "var(--text-secondary)", fontSize: 10 }} width={130} axisLine={false} tickLine={false} />
-                  <Tooltip content={<CTooltip formatter={fmt} />} />
-                  <Bar dataKey="value" fill="#A6C9CE" radius={[0, 6, 6, 0]} barSize={16} />
-                </BarChart>
-              </ResponsiveContainer>
+            <ChartCard
+              title={topMode === "clients" ? "Top Clients" : "Top Fournisseurs"}
+              expandable
+              expandMode="tall"
+              right={<Seg value={topMode} onChange={v => setTopMode(v as any)} options={[["clients", "Clients"], ["fournisseurs", "Fournisseurs"]]} />}
+              renderExpanded={() => (
+                <TopDetailView
+                  mode={topMode}
+                  clients={allClients}
+                  fournisseurs={allFourn}
+                />
+              )}
+            >
+              <div style={{ maxHeight: 260, overflowY: "auto" }}>
+                <ResponsiveContainer width="100%" height={Math.max(260, topData.length * 32)}>
+                  <BarChart data={topData as any[]} layout="vertical" margin={{ left: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+                    <XAxis type="number" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+                    <YAxis type="category" dataKey="name" tick={{ fill: "var(--text-secondary)", fontSize: 10 }} width={130} axisLine={false} tickLine={false} />
+                    <Tooltip content={<TopBarTooltip mode={topMode} />} />
+                    <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={16}>
+                      {topData.map((d: any, i: number) => (
+                        <Cell key={i} fill={topMode === "fournisseurs" ? (d.color || "#A6C9CE") : "#A6C9CE"} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </ChartCard>
 
             <ChartCard title="Rentabilité projets" sub="Montant vs marge — couleur = risque">
@@ -708,6 +829,215 @@ const fieldInput: React.CSSProperties = {
   borderRadius: "var(--radius-input)", color: "var(--text-primary)", fontFamily: "inherit", outline: "none",
 }
 
+function TopBarTooltip({ active, payload, mode }: any) {
+  if (!active || !payload?.length) return null
+  const d = payload[0].payload
+  return (
+    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 10, padding: "10px 14px", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", fontSize: "var(--fs-xs)", minWidth: 180 }}>
+      <div style={{ fontWeight: 700, marginBottom: 4, color: "var(--text-primary)" }}>{d.name}</div>
+      {mode === "fournisseurs" && d.categorie && (
+        <div style={{ fontSize: "var(--fs-2xs)", color: d.color || "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>{d.categorie}</div>
+      )}
+      <div style={{ fontFamily: "monospace", fontWeight: 600, color: "var(--text-primary)" }}>
+        {Math.round(d.value).toLocaleString("fr-FR")} MUR
+      </div>
+      {d.count != null && (
+        <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 2 }}>
+          {d.count} {mode === "fournisseurs" ? "dépense(s)" : "projet(s)"}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TopDetailView({ mode, clients, fournisseurs }: {
+  mode: "clients" | "fournisseurs"
+  clients: { name: string; value: number; count: number; projects: Project[] }[]
+  fournisseurs: { name: string; value: number; categorie: string; count: number; color: string }[]
+}) {
+  const data = mode === "clients" ? clients : fournisseurs
+  const total = data.reduce((s, d) => s + d.value, 0)
+
+  return (
+    <div style={{ height: "100%", overflowY: "auto" }}>
+      <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginBottom: 12 }}>
+        {data.length} {mode === "clients" ? "client(s)" : "fournisseur(s)"} · Total : {Math.round(total).toLocaleString("fr-FR")} MUR
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+        <thead style={{ position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 2 }}>
+          <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+            <th style={{ ...thStyle, width: 50 }}>#</th>
+            <th style={thStyle}>{mode === "clients" ? "Client" : "Fournisseur"}</th>
+            {mode === "fournisseurs" && <th style={thStyle}>Catégorie</th>}
+            <th style={{ ...thStyle, textAlign: "right" }}>{mode === "clients" ? "Projets" : "Dépenses"}</th>
+            <th style={{ ...thStyle, textAlign: "right" }}>Total (MUR)</th>
+            <th style={{ ...thStyle, textAlign: "right" }}>%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((d, i) => {
+            const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : "0.0"
+            const color = mode === "fournisseurs" ? (d as any).color : "#A6C9CE"
+            return (
+              <tr key={i} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)" }}>
+                <td style={{ ...tdStyle, color: "var(--text-muted)", fontFamily: "monospace" }}>{i + 1}</td>
+                <td style={{ ...tdStyle, fontWeight: 500 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0 }} />
+                    {d.name}
+                  </div>
+                </td>
+                {mode === "fournisseurs" && (
+                  <td style={tdStyle}>
+                    {(d as any).categorie ? (
+                      <span style={{ background: `${(d as any).color}22`, color: (d as any).color, padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{(d as any).categorie}</span>
+                    ) : "—"}
+                  </td>
+                )}
+                <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace", color: "var(--text-secondary)" }}>{(d as any).count ?? "—"}</td>
+                <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{Math.round(d.value).toLocaleString("fr-FR")}</td>
+                <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace", color: "var(--accent)" }}>{pct}%</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function BigPie({ data, colors, total, totalLabel, formatter, double }: {
+  data: { name: string; value?: number; amount?: number; count?: number }[]
+  colors: string[]
+  total?: number
+  totalLabel?: string
+  formatter: (v: number) => string
+  double?: boolean
+}) {
+  const getValue = (d: any) => d.value ?? d.amount ?? 0
+  const sum = total ?? data.reduce((s, d) => s + getValue(d), 0)
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 24, height: "100%", alignItems: "center" }}>
+      <div style={{ position: "relative", height: "100%", minHeight: 320 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            {double ? (
+              <>
+                <Pie data={data as any[]} dataKey="amount" nameKey="name" cx="50%" cy="50%" innerRadius="48%" outerRadius="68%" paddingAngle={2} strokeWidth={0}>
+                  {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+                </Pie>
+                <Pie data={data as any[]} dataKey="count" nameKey="name" cx="50%" cy="50%" innerRadius="28%" outerRadius="42%" paddingAngle={2} strokeWidth={0}>
+                  {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} opacity={0.5} />)}
+                </Pie>
+                <Tooltip content={<CTooltip formatter={(v: any) => Number(v) > 100 ? `${Math.round(Number(v)).toLocaleString("fr-FR")} MUR` : `${v} projets`} />} />
+              </>
+            ) : (
+              <>
+                <Pie data={data as any[]} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius="48%" outerRadius="75%" paddingAngle={2} strokeWidth={0}>
+                  {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
+                </Pie>
+                <Tooltip content={<CTooltip formatter={(v: any) => formatter(Number(v))} />} />
+              </>
+            )}
+          </PieChart>
+        </ResponsiveContainer>
+        {totalLabel && (
+          <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", textAlign: "center", pointerEvents: "none" }}>
+            <div style={{ fontSize: 32, fontWeight: 800, color: "var(--text-primary)", lineHeight: 1 }}>{formatter(sum)}</div>
+            <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>{totalLabel}</div>
+          </div>
+        )}
+      </div>
+      <div style={{ maxHeight: "100%", overflowY: "auto", paddingRight: 8 }}>
+        {data.map((d, i) => {
+          const v = getValue(d)
+          const pct = sum > 0 ? ((v / sum) * 100).toFixed(1) : "0"
+          return (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px", borderBottom: "1px solid rgba(166,201,206,0.06)" }}>
+              <span style={{ width: 12, height: 12, borderRadius: 3, background: colors[i % colors.length], flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: "var(--fs-sm)", color: "var(--text-primary)", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</div>
+                {double && (
+                  <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 2 }}>{d.count} projets</div>
+                )}
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontSize: "var(--fs-sm)", fontWeight: 700, fontFamily: "monospace", color: "var(--text-primary)" }}>{formatter(v)}</div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontFamily: "monospace" }}>{pct}%</div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function SignOutButton() {
+  const { data: session } = useSession()
+  const [open, setOpen] = useState(false)
+  const email = session?.user?.email ?? ""
+  const image = session?.user?.image ?? ""
+  const initial = (email || "?").slice(0, 1).toUpperCase()
+
+  useEffect(() => {
+    if (!open) return
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false) }
+    document.addEventListener("keydown", h)
+    return () => document.removeEventListener("keydown", h)
+  }, [open])
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        title={email || "Compte"}
+        style={{
+          width: 32, height: 32, borderRadius: "50%", overflow: "hidden",
+          background: "var(--accent-soft)", border: "1px solid var(--border-accent)",
+          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+          padding: 0, fontFamily: "inherit",
+        }}
+      >
+        {image ? (
+          <img src={image} alt={email} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : (
+          <span style={{ color: "var(--accent)", fontWeight: 700, fontSize: "var(--fs-sm)" }}>{initial}</span>
+        )}
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 998 }} />
+          <div style={{
+            position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 999,
+            background: "var(--bg-panel)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
+            border: "1px solid var(--border-panel)", borderRadius: 10,
+            padding: 8, minWidth: 220, boxShadow: "var(--shadow-card)",
+          }}>
+            <div style={{ padding: "8px 10px", fontSize: "var(--fs-2xs)", color: "var(--text-muted)", borderBottom: "1px solid var(--border-subtle)", marginBottom: 4 }}>
+              {email || "Non connecté"}
+            </div>
+            <button
+              onClick={() => signOut({ callbackUrl: "/login" })}
+              style={{
+                width: "100%", textAlign: "left", padding: "8px 10px", fontSize: "var(--fs-sm)",
+                background: "none", border: "none", color: "var(--color-error)",
+                cursor: "pointer", borderRadius: 6, fontFamily: "inherit", display: "flex", alignItems: "center", gap: 8,
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = "rgba(248,113,113,0.10)")}
+              onMouseLeave={e => (e.currentTarget.style.background = "none")}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" y1="12" x2="9" y2="12" /></svg>
+              Se déconnecter
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 function KpiCard({ icon, iconBg, iconBorder, label, value, unit, sub, valueColor }: {
   icon: string; iconBg: string; iconBorder: string; label: string; value: string; unit: string; sub?: string; valueColor?: string
 }) {
@@ -726,7 +1056,7 @@ function KpiCard({ icon, iconBg, iconBorder, label, value, unit, sub, valueColor
   )
 }
 
-function ChartCard({ title, value, sub, right, children, expandable, expandMode = "wide" }: { title: string; value?: string; sub?: string; right?: React.ReactNode; children: React.ReactNode; expandable?: boolean; expandMode?: "wide" | "tall" }) {
+function ChartCard({ title, value, sub, right, children, renderExpanded, expandable, expandMode = "wide" }: { title: string; value?: string; sub?: string; right?: React.ReactNode; children: React.ReactNode; renderExpanded?: () => React.ReactNode; expandable?: boolean; expandMode?: "wide" | "tall" }) {
   const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
@@ -771,9 +1101,9 @@ function ChartCard({ title, value, sub, right, children, expandable, expandMode 
         }} onClick={() => setExpanded(false)}>
           <div style={{
             ...card,
-            width: isWide ? "95vw" : "80vw",
+            width: isWide ? "95vw" : "90vw",
             height: isWide ? "auto" : "92vh",
-            maxWidth: isWide ? undefined : 900,
+            maxWidth: isWide ? undefined : 1200,
             maxHeight: isWide ? "auto" : "92vh",
             overflow: "hidden",
             padding: "28px 32px",
@@ -781,7 +1111,7 @@ function ChartCard({ title, value, sub, right, children, expandable, expandMode 
           }} onClick={e => e.stopPropagation()}>
             {header}
             <div className="chart-expanded" style={{ height: isWide ? "min(500px, calc(90vh - 140px))" : "calc(92vh - 130px)" }}>
-              {children}
+              {renderExpanded ? renderExpanded() : children}
             </div>
           </div>
         </div>
