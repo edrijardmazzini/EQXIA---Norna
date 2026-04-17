@@ -3,7 +3,6 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useSession } from "next-auth/react"
 import { useRouter } from "next/navigation"
 import { AppHeader } from "@/components/layout/AppHeader"
-import { Spinner } from "@/components/ui/Spinner"
 import { useTheme } from "@/hooks/useTheme"
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -256,8 +255,13 @@ export default function DashboardPage() {
 
   if (status === "loading" || loading) return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundImage: `url(${bgImage})`, backgroundSize: "cover", backgroundPosition: "center" }}>
-      <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.25)" }} />
-      <div style={{ textAlign: "center", position: "relative", zIndex: 1 }}><Spinner size={40} /><div style={{ color: "var(--text-accent)", fontSize: "var(--fs-sm)", marginTop: 12 }}>Chargement du dashboard…</div></div>
+      <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.32)" }} />
+      <div style={{ textAlign: "center", position: "relative", zIndex: 1 }}>
+        <img src="/assets/logos/eqxia-logo-teal-transparent.png" alt="EQXIA" style={{ height: "var(--loading-logo-h)", marginBottom: 20 }} />
+        <div style={{ color: "var(--text-accent)", fontSize: "var(--loading-app-fs)", fontWeight: 800, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 28 }}>Plutus</div>
+        <div style={{ width: 36, height: 36, border: "3px solid var(--border-subtle)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
+        <div style={{ color: "var(--text-accent)", fontSize: "var(--fs-sm)", letterSpacing: "0.05em" }}>Chargement…</div>
+      </div>
     </div>
   )
 
@@ -553,13 +557,28 @@ export default function DashboardPage() {
         </main>
       </div>
 
-      {/* Theme toggle */}
+      {/* Theme toggle — style Themis */}
       <div style={{ position: "fixed", bottom: 20, left: 20, zIndex: 100, display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
-        <div style={{ display: "flex", flexDirection: "column", background: "var(--bg-panel)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", border: "1px solid var(--border-panel)", borderRadius: 10, overflow: "hidden", boxShadow: "var(--shadow-card)" }}>
-          <button onClick={() => setThemeOpen(!themeOpen)} style={{ width: 36, height: 36, background: "var(--accent-soft)", border: "none", borderLeft: "2px solid var(--accent)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--fs-base)" }}>{{ auto: "\u{1F310}", dark: "\u{1F319}", light: "\u{2600}\u{FE0F}" }[mode]}</button>
-          {themeOpen && (["auto", "dark", "light"] as const).filter(m => m !== mode).map(m => (
-            <button key={m} onClick={() => { setTheme(m); setThemeOpen(false) }} style={{ width: 36, height: 36, background: "none", border: "none", borderLeft: "2px solid transparent", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--fs-base)", opacity: 0.5, animation: "fade-in 0.15s ease" }}>{{ auto: "\u{1F310}", dark: "\u{1F319}", light: "\u{2600}\u{FE0F}" }[m]}</button>
-          ))}
+        <div style={{ position: "relative" }}>
+          {themeOpen && (
+            <>
+              <div onClick={() => setThemeOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 98 }} />
+              <div style={{ position: "absolute", bottom: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)", display: "flex", flexDirection: "column", gap: 4, zIndex: 99, background: "var(--bg-panel)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", border: "1px solid var(--border-panel)", borderRadius: 10, padding: 4, boxShadow: "var(--shadow-card)" }}>
+                {(["auto", "dark", "light"] as const).map(m => {
+                  const icons: Record<string, string> = { auto: "\u{1F310}", dark: "\u{1F319}", light: "\u{2600}\u{FE0F}" }
+                  const active = mode === m
+                  return (
+                    <button key={m} onClick={() => { setTheme(m); setThemeOpen(false) }} style={{ width: 36, height: 36, background: active ? "var(--accent-soft)" : "none", border: "none", borderLeft: active ? "2px solid var(--accent)" : "2px solid transparent", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--fs-base)", transition: "background 0.2s", opacity: active ? 1 : 0.5 }}>
+                      {icons[m]}
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )}
+          <button onClick={() => setThemeOpen(!themeOpen)} title="Thème" style={{ width: 36, height: 36, background: "var(--bg-panel)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", border: "1px solid var(--border-panel)", borderRadius: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--fs-base)", boxShadow: "var(--shadow-card)", transition: "opacity 0.2s" }}>
+            {({ auto: "\u{1F310}", dark: "\u{1F319}", light: "\u{2600}\u{FE0F}" } as Record<string, string>)[mode]}
+          </button>
         </div>
       </div>
 

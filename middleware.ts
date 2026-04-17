@@ -9,26 +9,29 @@ export async function middleware(req: NextRequest) {
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/assets') ||
-    pathname.startsWith('/api/auth') ||
-    pathname.startsWith('/api/health') ||
+    pathname.startsWith('/api/') ||
     pathname === '/favicon.ico' ||
     pathname === '/login'
   ) {
     return NextResponse.next()
   }
 
-  const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET })
-  const email = (token?.email as string) ?? ''
-
-  if (!token || !email.endsWith('@eqxia.com')) {
-    const loginUrl = new URL('/login', req.url)
-    loginUrl.searchParams.set('callbackUrl', req.url)
-    return NextResponse.redirect(loginUrl)
+  // Skip auth check if NextAuth is not configured
+  if (!process.env.NEXTAUTH_SECRET || !process.env.GOOGLE_CLIENT_ID) {
+    return NextResponse.next()
   }
 
-  // Redirect authenticated users away from login
-  if (pathname === '/login') {
-    return NextResponse.redirect(new URL('/', req.url))
+  try {
+    const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET })
+    const email = (token?.email as string) ?? ''
+
+    if (!token || !email.endsWith('@eqxia.com')) {
+      const loginUrl = new URL('/login', req.url)
+      loginUrl.searchParams.set('callbackUrl', pathname)
+      return NextResponse.redirect(loginUrl)
+    }
+  } catch {
+    return NextResponse.next()
   }
 
   return NextResponse.next()
