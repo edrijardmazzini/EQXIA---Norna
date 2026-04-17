@@ -78,6 +78,7 @@ export default function DashboardPage() {
   const [showAddVente, setShowAddVente] = useState(false)
   const [saving, setSaving] = useState(false)
   const [revenueDetailMois, setRevenueDetailMois] = useState<string | null>(null)
+  const [revenueHoverMois, setRevenueHoverMois] = useState<string | null>(null)
 
   // Filter states
   const [venteFilters, setVenteFilters] = useState<Record<string, string>>({})
@@ -409,24 +410,51 @@ export default function DashboardPage() {
 
           {/* ── Row 2: Revenus mensuels + Par type double donut ── */}
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16 }}>
-            <ChartCard title="Revenus mensuels" sub="Clic sur un point pour détails" value={`${Math.round(revTotal).toLocaleString("fr-FR")} MUR`} expandable>
-              <ResponsiveContainer width="100%" height={280}>
-                <AreaChart
-                  data={revParMois}
-                  onClick={(e: any) => {
-                    const code = e?.activePayload?.[0]?.payload?.mois
-                    if (code) setRevenueDetailMois(code)
-                  }}
-                  style={{ cursor: "pointer" }}
-                >
-                  <defs><linearGradient id="gRev2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A6C9CE" stopOpacity={0.4} /><stop offset="100%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient></defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
-                  <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-                  <Tooltip content={<RevenueTooltip ventesListByMois={ventesListByMois} />} />
-                  <Area type="monotone" dataKey="revenus" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev2)" dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} />
-                </AreaChart>
-              </ResponsiveContainer>
+            <ChartCard title="Revenus mensuels" sub="Clic sur un mois pour voir les ventes détaillées" value={`${Math.round(revTotal).toLocaleString("fr-FR")} MUR`} expandable>
+              <div
+                onClick={() => { if (revenueHoverMois) setRevenueDetailMois(revenueHoverMois) }}
+                style={{ cursor: revenueHoverMois ? "pointer" : "default" }}
+              >
+                <ResponsiveContainer width="100%" height={280}>
+                  <AreaChart
+                    data={revParMois}
+                    onMouseMove={(e: any) => {
+                      const code = e?.activePayload?.[0]?.payload?.mois
+                      if (code && code !== revenueHoverMois) setRevenueHoverMois(code)
+                    }}
+                    onMouseLeave={() => setRevenueHoverMois(null)}
+                    onClick={(e: any) => {
+                      const code = e?.activePayload?.[0]?.payload?.mois
+                      if (code) setRevenueDetailMois(code)
+                    }}
+                  >
+                    <defs><linearGradient id="gRev2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A6C9CE" stopOpacity={0.4} /><stop offset="100%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient></defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+                    <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+                    <Tooltip content={<RevenueTooltip ventesListByMois={ventesListByMois} />} />
+                    <Area
+                      type="monotone"
+                      dataKey="revenus"
+                      stroke="#A6C9CE"
+                      strokeWidth={2}
+                      fill="url(#gRev2)"
+                      dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }}
+                      activeDot={{
+                        r: 6,
+                        fill: "#A6C9CE",
+                        stroke: "var(--bg-card)",
+                        strokeWidth: 2,
+                        style: { cursor: "pointer" },
+                        onClick: (_: any, e: any) => {
+                          e?.stopPropagation?.()
+                          if (revenueHoverMois) setRevenueDetailMois(revenueHoverMois)
+                        },
+                      }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
             </ChartCard>
 
             <ChartCard title="Par type de projet" expandable expandMode="tall">
