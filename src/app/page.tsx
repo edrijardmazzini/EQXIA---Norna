@@ -42,6 +42,13 @@ const RISK_COLORS: Record<string, string> = { Low: "#22c55e", Medium: "#f97316",
 const STATUS_OPTIONS = ["Won", "Won orally", "Active", "Completed", "Lost", "Cancelled", "Pending", "Proposal"]
 const TYPE_OPTIONS = ["Consulting", "Training", "Internal", "Workshop", "Product", "Advisory"]
 const METHODOLOGY_OPTIONS = ["Agile", "Waterfall", "Hybrid", "Ad-hoc"]
+// Taux de conversion vers MUR (utilisés pour Final Amount si Currency != MUR)
+const CURRENCY_RATES: Record<string, number> = { MUR: 1, EUR: 49, USD: 46, GBP: 57 }
+const toMUR = (amount: number, currency: string | undefined | null): number => {
+  const rate = CURRENCY_RATES[currency || "MUR"] ?? 1
+  return (amount || 0) * rate
+}
+
 const CURRENCY_OPTIONS = ["MUR", "EUR", "USD", "GBP"]
 const RISK_OPTIONS = ["Low", "Medium", "High"]
 const SATISFACTION_OPTIONS = ["Very Satisfied", "Satisfied", "Neutral", "Unsatisfied"]
@@ -70,6 +77,7 @@ export default function DashboardPage() {
   const [editDepense, setEditDepense] = useState<Depense | null>(null)
   const [showAddVente, setShowAddVente] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [revenueDetailMois, setRevenueDetailMois] = useState<string | null>(null)
 
   // Filter states
   const [venteFilters, setVenteFilters] = useState<Record<string, string>>({})
@@ -101,7 +109,7 @@ export default function DashboardPage() {
   }, [depenses, depPeriod, currentDossier, currentYear, quarterStart])
 
   const depTotal = useMemo(() => depFiltered.reduce((s, d) => s + d.montantMUR, 0), [depFiltered])
-  const revTotal = useMemo(() => projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).reduce((s, p) => s + (p.finalAmount || 0), 0), [projects])
+  const revTotal = useMemo(() => projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).reduce((s, p) => s + toMUR(p.finalAmount, p.currency), 0), [projects])
   const totalProfit = revTotal - depTotal
   const avgMargin = revTotal > 0 ? ((totalProfit / revTotal) * 100) : 0
   const projetsActifs = useMemo(() => projects.filter(p => p.status === "Active").length, [projects])
@@ -125,7 +133,7 @@ export default function DashboardPage() {
   const revParMois = useMemo(() => {
     const revMap: Record<string, number> = {}
     projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => {
-      if (!p.startDate) return; const d = new Date(p.startDate); const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`; revMap[k] = (revMap[k] || 0) + (p.finalAmount || 0)
+      if (!p.startDate) return; const d = new Date(p.startDate); const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`; revMap[k] = (revMap[k] || 0) + toMUR(p.finalAmount, p.currency)
     })
     const depMap: Record<string, number> = {}
     depenses.forEach(d => { if (d.dossier) depMap[d.dossier] = (depMap[d.dossier] || 0) + d.montantMUR })
@@ -139,10 +147,25 @@ export default function DashboardPage() {
     return m
   }, [depenses])
 
+  // Liste des ventes par mois (clé = dossier-style "YYMM") — pour tooltip "Revenus mensuels"
+  const ventesListByMois = useMemo(() => {
+    const m: Record<string, Project[]> = {}
+    projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status) && p.finalAmount > 0).forEach(p => {
+      if (!p.startDate) return
+      const d = new Date(p.startDate)
+      const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+      if (!m[k]) m[k] = []
+      m[k].push(p)
+    })
+    // Trier chaque mois par montant décroissant (en MUR)
+    Object.keys(m).forEach(k => m[k].sort((a, b) => toMUR(b.finalAmount, b.currency) - toMUR(a.finalAmount, a.currency)))
+    return m
+  }, [projects])
+
   const projParTypeFiltered = useMemo(() => {
     const m: Record<string, { count: number; amount: number }> = {}
     projects.filter(p => !["Lost", "Cancelled"].includes(p.status)).forEach(p => {
-      const t = p.type || "N/A"; if (!m[t]) m[t] = { count: 0, amount: 0 }; m[t].count++; m[t].amount += p.finalAmount || 0
+      const t = p.type || "N/A"; if (!m[t]) m[t] = { count: 0, amount: 0 }; m[t].count++; m[t].amount += toMUR(p.finalAmount, p.currency)
     })
     return Object.entries(m).filter(([n]) => n !== "Internal" && n !== "N/A").map(([name, v]) => ({ name, ...v })).sort((a, b) => b.amount - a.amount)
   }, [projects])
@@ -156,7 +179,7 @@ export default function DashboardPage() {
   const topClients = useMemo(() => {
     const m: Record<string, number> = {}
     projects.filter(p => !["Lost", "Cancelled"].includes(p.status) && p.clientName && p.clientName !== "N/A").forEach(p => {
-      m[p.clientName] = (m[p.clientName] || 0) + (p.finalAmount || 0)
+      m[p.clientName] = (m[p.clientName] || 0) + toMUR(p.finalAmount, p.currency)
     })
     return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value).slice(0, 8)
   }, [projects])
@@ -168,7 +191,7 @@ export default function DashboardPage() {
     projects
       .filter(p => p.finalAmount > 0 && p.rentabilite != null && p.type !== "Internal")
       .map(p => ({
-        name: p.name, x: p.finalAmount, y: (p.rentabilite ?? 0) * 100, risk: p.riskLevel || "Null",
+        name: p.name, x: toMUR(p.finalAmount, p.currency), y: (p.rentabilite ?? 0) * 100, risk: p.riskLevel || "Null",
       }))
   , [projects])
 
@@ -176,7 +199,7 @@ export default function DashboardPage() {
   const heroData = useMemo(() => {
     const allM = new Set<string>()
     const dM: Record<string, number> = {}; depenses.forEach(d => { if (!d.dossier) return; dM[d.dossier] = (dM[d.dossier] || 0) + d.montantMUR; allM.add(d.dossier) })
-    const rM: Record<string, number> = {}; projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => { if (!p.startDate) return; const d = new Date(p.startDate); const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`; rM[k] = (rM[k] || 0) + (p.finalAmount || 0); allM.add(k) })
+    const rM: Record<string, number> = {}; projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => { if (!p.startDate) return; const d = new Date(p.startDate); const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`; rM[k] = (rM[k] || 0) + toMUR(p.finalAmount, p.currency); allM.add(k) })
     let s = [...allM].sort(); if (timeRange !== "all") { const n = timeRange === "12m" ? 12 : timeRange === "6m" ? 6 : 3; s = s.slice(-n) }
     return s.map(m => ({ mois: m, label: fmtDossier(m), depenses: dM[m] || 0, revenus: rM[m] || 0, net: (rM[m] || 0) - (dM[m] || 0) }))
   }, [depenses, projects, timeRange])
@@ -386,14 +409,21 @@ export default function DashboardPage() {
 
           {/* ── Row 2: Revenus mensuels + Par type double donut ── */}
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16 }}>
-            <ChartCard title="Revenus mensuels" value={`${Math.round(revTotal).toLocaleString("fr-FR")} MUR`} expandable>
+            <ChartCard title="Revenus mensuels" sub="Clic sur un point pour détails" value={`${Math.round(revTotal).toLocaleString("fr-FR")} MUR`} expandable>
               <ResponsiveContainer width="100%" height={280}>
-                <AreaChart data={revParMois}>
+                <AreaChart
+                  data={revParMois}
+                  onClick={(e: any) => {
+                    const code = e?.activePayload?.[0]?.payload?.mois
+                    if (code) setRevenueDetailMois(code)
+                  }}
+                  style={{ cursor: "pointer" }}
+                >
                   <defs><linearGradient id="gRev2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A6C9CE" stopOpacity={0.4} /><stop offset="100%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient></defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
                   <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-                  <Tooltip content={<RevenueTooltip depListByDossier={depListByDossier} />} />
+                  <Tooltip content={<RevenueTooltip ventesListByMois={ventesListByMois} />} />
                   <Area type="monotone" dataKey="revenus" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev2)" dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} />
                 </AreaChart>
               </ResponsiveContainer>
@@ -607,6 +637,15 @@ export default function DashboardPage() {
           onClose={() => setEditDepense(null)}
           onSave={handleSaveDepense}
           saving={saving}
+        />
+      )}
+
+      {revenueDetailMois && (
+        <RevenueDetailModal
+          moisCode={revenueDetailMois}
+          ventes={ventesListByMois[revenueDetailMois] || []}
+          onClose={() => setRevenueDetailMois(null)}
+          onSelectProject={(p) => { setRevenueDetailMois(null); setEditProject(p) }}
         />
       )}
     </div>
@@ -949,6 +988,62 @@ function DepenseModal({ depense, onClose, onSave, saving }: {
   )
 }
 
+function RevenueDetailModal({ moisCode, ventes, onClose, onSelectProject }: {
+  moisCode: string; ventes: Project[]; onClose: () => void; onSelectProject: (p: Project) => void
+}) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", h)
+    return () => document.removeEventListener("keydown", h)
+  }, [onClose])
+
+  const totalMUR = ventes.reduce((s, p) => s + toMUR(p.finalAmount, p.currency), 0)
+  const sorted = [...ventes].sort((a, b) => toMUR(b.finalAmount, b.currency) - toMUR(a.finalAmount, a.currency))
+
+  return (
+    <div style={modalOverlay} onClick={onClose}>
+      <div style={{ ...modalBox, maxWidth: 820, width: "90vw" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "var(--text-primary)" }}>Ventes — {fmtDossier(moisCode)}</div>
+            <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>
+              {ventes.length} vente{ventes.length > 1 ? "s" : ""} · Total : {Math.round(totalMUR).toLocaleString("fr-FR")} MUR
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18 }}>✕</button>
+        </div>
+
+        {sorted.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>Aucune vente ce mois</div>
+        ) : (
+          <div style={{ maxHeight: "70vh", overflowY: "auto", border: "1px solid rgba(166,201,206,0.10)", borderRadius: 8 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+              <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--bg-card)" }}>
+                <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                  {["Date", "Projet", "Client", "Type", "Status", "Montant", "MUR"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {sorted.map((p, i) => (
+                  <tr key={p.id || i} onClick={() => onSelectProject(p)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                    <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{p.startDate || "—"}</td>
+                    <td style={{ ...tdStyle, fontWeight: 500 }}>{p.name}</td>
+                    <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName}</td>
+                    <td style={tdStyle}><span style={{ background: "var(--accent-soft)", color: "var(--accent)", padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{p.type}</span></td>
+                    <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status}</td>
+                    <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 600 }}>{Math.round(p.finalAmount).toLocaleString("fr-FR")} {p.currency}</td>
+                    <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "var(--accent)" }}>{Math.round(toMUR(p.finalAmount, p.currency)).toLocaleString("fr-FR")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ─── Chart sub-components ─────────────────────────────────────────────────────
 
 function Badge({ c, l, v }: { c: string; l: string; v: string }) {
@@ -982,27 +1077,29 @@ function HeroTooltip({ active, payload, label }: any) {
   )
 }
 
-function RevenueTooltip({ active, payload, label, depListByDossier }: any) {
+function RevenueTooltip({ active, payload, label, ventesListByMois }: any) {
   if (!active || !payload?.length) return null
   const rev = payload.find((p: any) => p.dataKey === "revenus")?.value ?? 0
   const point = payload[0]?.payload; const moisCode = point?.mois || ""
-  const depList = (depListByDossier?.[moisCode] || []).slice(0, 5) as Depense[]
+  const allVentes = (ventesListByMois?.[moisCode] || []) as Project[]
+  const ventes = allVentes.slice(0, 5)
   return (
-    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "14px 18px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)", fontSize: "var(--fs-xs)", minWidth: 240, maxWidth: 320 }}>
+    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "14px 18px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)", fontSize: "var(--fs-xs)", minWidth: 240, maxWidth: 340 }}>
       <div style={{ fontWeight: 700, marginBottom: 10, color: "var(--text-secondary)", fontSize: "var(--fs-sm)" }}>{label}</div>
-      <TRow c="#A6C9CE" l="Revenus" v={Math.round(rev).toLocaleString("fr-FR")} vc="#A6C9CE" />
-      {depList.length > 0 && (
+      <TRow c="#A6C9CE" l="Revenus" v={`${Math.round(rev).toLocaleString("fr-FR")} MUR`} vc="#A6C9CE" />
+      {ventes.length > 0 && (
         <div style={{ borderTop: "1px solid rgba(166,201,206,0.10)", paddingTop: 8, marginTop: 8 }}>
-          <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>Dépenses du mois :</div>
-          {depList.map((d, i) => (
+          <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>Ventes du mois :</div>
+          {ventes.map((p, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "2px 0", fontSize: "var(--fs-2xs)" }}>
-              <span style={{ color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{d.fournisseur || d.description}</span>
-              <span style={{ fontFamily: "monospace", fontWeight: 600, flexShrink: 0 }}>{d.montant.toLocaleString("fr-FR")} {d.devise}</span>
+              <span style={{ color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{p.clientName || p.name}</span>
+              <span style={{ fontFamily: "monospace", fontWeight: 600, flexShrink: 0 }}>{Math.round(p.finalAmount).toLocaleString("fr-FR")} {p.currency}</span>
             </div>
           ))}
-          {(depListByDossier?.[moisCode]?.length || 0) > 5 && <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 2 }}>+ {depListByDossier[moisCode].length - 5} autres</div>}
+          {allVentes.length > 5 && <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4, fontStyle: "italic" }}>+ {allVentes.length - 5} autres — cliquez pour voir toutes</div>}
         </div>
       )}
+      {ventes.length === 0 && <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 6, fontStyle: "italic" }}>Aucune vente ce mois</div>}
     </div>
   )
 }
