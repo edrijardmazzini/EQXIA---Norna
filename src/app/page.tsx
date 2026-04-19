@@ -82,6 +82,8 @@ export default function DashboardPage() {
   const [saving, setSaving] = useState(false)
   const [revenueDetailMois, setRevenueDetailMois] = useState<string | null>(null)
   const [revenueHoverMois, setRevenueHoverMois] = useState<string | null>(null)
+  const revenueHoverRef = useRef<string | null>(null)
+  const [topDetailItem, setTopDetailItem] = useState<{ mode: "clients" | "fournisseurs"; name: string } | null>(null)
 
   // Filter states
   const [venteFilters, setVenteFilters] = useState<Record<string, string>>({})
@@ -149,11 +151,12 @@ export default function DashboardPage() {
   }, [depenses])
   const allCats = useMemo(() => [...new Set(depenses.map(d => d.categorie).filter(Boolean))], [depenses])
 
+  // Toujours calculé sur TOUTES les dépenses (ne dépend PAS de kpiPeriod)
   const depParCat = useMemo(() => {
     const m: Record<string, number> = {}
-    depFiltered.forEach(d => { if (d.categorie) m[d.categorie] = (m[d.categorie] || 0) + d.montantMUR })
+    depenses.forEach(d => { if (d.categorie) m[d.categorie] = (m[d.categorie] || 0) + d.montantMUR })
     return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
-  }, [depFiltered])
+  }, [depenses])
 
   const revParMois = useMemo(() => {
     const revMap: Record<string, number> = {}
@@ -263,16 +266,34 @@ export default function DashboardPage() {
 
   const topFourn = useMemo(() => allFourn.slice(0, 25), [allFourn])
 
+  // Types de projets utilisés (hors Internal / N/A) — mêmes couleurs que pie "Revenus par type"
+  const allProjectTypes = useMemo(() => {
+    const s = new Set<string>()
+    projects.filter(p => !["Lost", "Cancelled"].includes(p.status)).forEach(p => {
+      const t = p.type || "N/A"
+      if (t !== "Internal" && t !== "N/A") s.add(t)
+    })
+    return [...s].sort()
+  }, [projects])
+
   const allClients = useMemo(() => {
-    const m: Record<string, { value: number; count: number; projects: Project[] }> = {}
+    const m: Record<string, { value: number; count: number; projects: Project[]; byType: Record<string, number> }> = {}
     projects.filter(p => !["Lost", "Cancelled"].includes(p.status) && p.clientName && p.clientName !== "N/A").forEach(p => {
-      if (!m[p.clientName]) m[p.clientName] = { value: 0, count: 0, projects: [] }
-      m[p.clientName].value += toMUR(p.finalAmount, p.currency)
+      if (!m[p.clientName]) m[p.clientName] = { value: 0, count: 0, projects: [], byType: {} }
+      const amt = toMUR(p.finalAmount, p.currency)
+      m[p.clientName].value += amt
       m[p.clientName].count += 1
       m[p.clientName].projects.push(p)
+      const type = p.type || "N/A"
+      m[p.clientName].byType[type] = (m[p.clientName].byType[type] || 0) + amt
     })
-    return Object.entries(m).map(([name, v]) => ({ name, value: v.value, count: v.count, projects: v.projects })).sort((a, b) => b.value - a.value)
-  }, [projects])
+    return Object.entries(m).map(([name, v]) => {
+      // Spread byType directement sur l'objet pour que Recharts puisse stacker
+      const row: any = { name, value: v.value, count: v.count, projects: v.projects }
+      allProjectTypes.forEach(t => { row[t] = v.byType[t] || 0 })
+      return row
+    }).sort((a, b) => b.value - a.value)
+  }, [projects, allProjectTypes])
 
   const topClients = useMemo(() => allClients.slice(0, 25), [allClients])
 
@@ -373,7 +394,7 @@ export default function DashboardPage() {
       <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.32)" }} />
       <div style={{ textAlign: "center", position: "relative", zIndex: 1 }}>
         <img src="/assets/logos/eqxia-logo-teal-transparent.png" alt="EQXIA" style={{ height: "var(--loading-logo-h)", marginBottom: 20 }} />
-        <div style={{ color: "#A6C9CE", fontFamily: "'Inter', system-ui, sans-serif", fontSize: "var(--loading-app-fs)", fontWeight: 300, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 28 }}>Plutus</div>
+        <div style={{ color: "#A6C9CE", fontFamily: "'Inter', system-ui, sans-serif", fontSize: "var(--loading-app-fs)", fontWeight: 800, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 28 }}>Plutus</div>
         <div style={{ width: 36, height: 36, border: "3px solid var(--border-subtle)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
         <div style={{ color: "#A6C9CE", fontFamily: "'Inter', system-ui, sans-serif", fontSize: "var(--fs-sm)", fontWeight: 300, letterSpacing: "0.12em" }}>Chargement…</div>
       </div>
@@ -500,7 +521,7 @@ export default function DashboardPage() {
                 <BigPie
                   data={depParCat}
                   colors={depParCat.map(d => CAT_COLORS[d.name] || PIE_CAT[0])}
-                  total={depTotal}
+                  total={depTotalAll}
                   totalLabel="Dépenses totales"
                   formatter={v => `${Math.round(v).toLocaleString("fr-FR")} MUR`}
                 />
@@ -510,7 +531,7 @@ export default function DashboardPage() {
                 <PieChart>
                   <Pie data={depParCat} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={2} strokeWidth={0}
                     label={({ cx, cy, midAngle, outerRadius: or, name, value }: any) => {
-                      const pct = depTotal > 0 ? ((value / depTotal) * 100).toFixed(0) : "0"
+                      const pct = depTotalAll > 0 ? ((value / depTotalAll) * 100).toFixed(0) : "0"
                       if (Number(pct) < 3) return null
                       const R = Math.PI / 180; const cos = Math.cos(-midAngle * R); const sin = Math.sin(-midAngle * R)
                       const mx = cx + (or + 12) * cos; const my = cy + (or + 12) * sin
@@ -537,7 +558,10 @@ export default function DashboardPage() {
               right={<Seg value={revMode} onChange={v => setRevMode(v as any)} options={[["total", "Total"], ["types", "Par types"]]} />}
             >
               <div
-                onClick={() => { if (revenueHoverMois) setRevenueDetailMois(revenueHoverMois) }}
+                onClickCapture={() => {
+                  const code = revenueHoverRef.current
+                  if (code) setRevenueDetailMois(code)
+                }}
                 style={{ cursor: "pointer" }}
               >
                 <ResponsiveContainer width="100%" height={280}>
@@ -545,7 +569,14 @@ export default function DashboardPage() {
                     data={revMode === "types" ? revParMoisParType.data : revParMois}
                     onMouseMove={(e: any) => {
                       const code = e?.activePayload?.[0]?.payload?.mois
-                      if (code && code !== revenueHoverMois) setRevenueHoverMois(code)
+                      if (code) {
+                        revenueHoverRef.current = code
+                        if (code !== revenueHoverMois) setRevenueHoverMois(code)
+                      }
+                    }}
+                    onClick={(e: any) => {
+                      const code = e?.activePayload?.[0]?.payload?.mois || revenueHoverRef.current
+                      if (code) setRevenueDetailMois(code)
                     }}
                   >
                     <defs>
@@ -629,21 +660,43 @@ export default function DashboardPage() {
                   mode={topMode}
                   clients={allClients}
                   fournisseurs={allFourn}
+                  onSelectItem={(name) => setTopDetailItem({ mode: topMode, name })}
                 />
               )}
             >
               <div style={{ maxHeight: 260, overflowY: "auto" }}>
                 <ResponsiveContainer width="100%" height={Math.max(260, topData.length * 32)}>
-                  <BarChart data={topData as any[]} layout="vertical" margin={{ left: 20 }}>
+                  <BarChart data={topData as any[]} layout="vertical" margin={{ left: 20 }} style={{ cursor: "pointer" }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
                     <XAxis type="number" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                     <YAxis type="category" dataKey="name" tick={{ fill: "var(--text-secondary)", fontSize: 10 }} width={130} axisLine={false} tickLine={false} />
-                    <Tooltip content={<TopBarTooltip mode={topMode} />} />
-                    <Bar dataKey="value" radius={[0, 6, 6, 0]} barSize={16}>
-                      {topData.map((d: any, i: number) => (
-                        <Cell key={i} fill={topMode === "fournisseurs" ? (d.color || "#A6C9CE") : "#A6C9CE"} />
-                      ))}
-                    </Bar>
+                    <Tooltip content={<TopBarTooltip mode={topMode} types={allProjectTypes} typeColors={allProjectTypes.map((_, i) => PIE_TYPE[i % PIE_TYPE.length])} />} />
+                    {topMode === "clients" ? (
+                      allProjectTypes.map((t, i) => (
+                        <Bar
+                          key={t}
+                          dataKey={t}
+                          stackId="clients"
+                          fill={PIE_TYPE[i % PIE_TYPE.length]}
+                          barSize={16}
+                          radius={i === allProjectTypes.length - 1 ? [0, 6, 6, 0] : 0}
+                          onClick={(d: any) => { if (d?.name) setTopDetailItem({ mode: "clients", name: d.name }) }}
+                          style={{ cursor: "pointer" }}
+                        />
+                      ))
+                    ) : (
+                      <Bar
+                        dataKey="value"
+                        radius={[0, 6, 6, 0]}
+                        barSize={16}
+                        onClick={(d: any) => { if (d?.name) setTopDetailItem({ mode: "fournisseurs", name: d.name }) }}
+                        style={{ cursor: "pointer" }}
+                      >
+                        {topData.map((d: any, i: number) => (
+                          <Cell key={i} fill={d.color || "#A6C9CE"} />
+                        ))}
+                      </Bar>
+                    )}
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -823,6 +876,18 @@ export default function DashboardPage() {
           onSelectProject={(p) => { setRevenueDetailMois(null); setEditProject(p) }}
         />
       )}
+
+      {topDetailItem && (
+        <TopItemDetailModal
+          mode={topDetailItem.mode}
+          name={topDetailItem.name}
+          projects={topDetailItem.mode === "clients" ? (allClients.find(c => c.name === topDetailItem.name)?.projects ?? []) : []}
+          depenses={topDetailItem.mode === "fournisseurs" ? depenses.filter(d => d.fournisseur === topDetailItem.name) : []}
+          onClose={() => setTopDetailItem(null)}
+          onSelectProject={(p) => { setTopDetailItem(null); setEditProject(p) }}
+          onSelectDepense={(d) => { setTopDetailItem(null); setEditDepense(d) }}
+        />
+      )}
     </div>
   )
 }
@@ -855,31 +920,47 @@ const fieldInput: React.CSSProperties = {
   borderRadius: "var(--radius-input)", color: "var(--text-primary)", fontFamily: "inherit", outline: "none",
 }
 
-function TopBarTooltip({ active, payload, mode }: any) {
+function TopBarTooltip({ active, payload, mode, types, typeColors }: any) {
   if (!active || !payload?.length) return null
   const d = payload[0].payload
   return (
-    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 10, padding: "10px 14px", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", fontSize: "var(--fs-xs)", minWidth: 180 }}>
-      <div style={{ fontWeight: 700, marginBottom: 4, color: "var(--text-primary)" }}>{d.name}</div>
+    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 10, padding: "12px 14px", boxShadow: "0 8px 32px rgba(0,0,0,0.4)", fontSize: "var(--fs-xs)", minWidth: 220 }}>
+      <div style={{ fontWeight: 700, marginBottom: 6, color: "var(--text-primary)" }}>{d.name}</div>
       {mode === "fournisseurs" && d.categorie && (
-        <div style={{ fontSize: "var(--fs-2xs)", color: d.color || "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>{d.categorie}</div>
+        <div style={{ fontSize: "var(--fs-2xs)", color: d.color || "var(--text-muted)", marginBottom: 6, fontWeight: 600 }}>{d.categorie}</div>
       )}
-      <div style={{ fontFamily: "monospace", fontWeight: 600, color: "var(--text-primary)" }}>
+      <div style={{ fontFamily: "monospace", fontWeight: 700, color: "var(--accent)", marginBottom: mode === "clients" && types ? 8 : 2 }}>
         {Math.round(d.value).toLocaleString("fr-FR")} MUR
       </div>
+      {mode === "clients" && types && (
+        <div style={{ borderTop: "1px solid rgba(166,201,206,0.10)", paddingTop: 6, marginTop: 2 }}>
+          {types.map((t: string, i: number) => {
+            const v = d[t] || 0
+            if (v === 0) return null
+            return (
+              <div key={t} style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", fontSize: "var(--fs-2xs)" }}>
+                <span style={{ width: 8, height: 8, borderRadius: 2, background: typeColors[i], flexShrink: 0 }} />
+                <span style={{ color: "var(--text-muted)", flex: 1 }}>{t}</span>
+                <span style={{ fontFamily: "monospace", fontWeight: 600 }}>{Math.round(v).toLocaleString("fr-FR")}</span>
+              </div>
+            )
+          })}
+        </div>
+      )}
       {d.count != null && (
-        <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 2 }}>
-          {d.count} {mode === "fournisseurs" ? "dépense(s)" : "projet(s)"}
+        <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4, fontStyle: "italic" }}>
+          {d.count} {mode === "fournisseurs" ? "dépense(s)" : "projet(s)"} · Clic pour détails
         </div>
       )}
     </div>
   )
 }
 
-function TopDetailView({ mode, clients, fournisseurs }: {
+function TopDetailView({ mode, clients, fournisseurs, onSelectItem }: {
   mode: "clients" | "fournisseurs"
-  clients: { name: string; value: number; count: number; projects: Project[] }[]
+  clients: any[]
   fournisseurs: { name: string; value: number; categorie: string; count: number; color: string }[]
+  onSelectItem: (name: string) => void
 }) {
   const data = mode === "clients" ? clients : fournisseurs
   const total = data.reduce((s, d) => s + d.value, 0)
@@ -887,7 +968,7 @@ function TopDetailView({ mode, clients, fournisseurs }: {
   return (
     <div style={{ height: "100%", overflowY: "auto" }}>
       <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginBottom: 12 }}>
-        {data.length} {mode === "clients" ? "client(s)" : "fournisseur(s)"} · Total : {Math.round(total).toLocaleString("fr-FR")} MUR
+        {data.length} {mode === "clients" ? "client(s)" : "fournisseur(s)"} · Total : {Math.round(total).toLocaleString("fr-FR")} MUR · Clic sur une ligne pour détails
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
         <thead style={{ position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 2 }}>
@@ -903,9 +984,15 @@ function TopDetailView({ mode, clients, fournisseurs }: {
         <tbody>
           {data.map((d, i) => {
             const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : "0.0"
-            const color = mode === "fournisseurs" ? (d as any).color : "#A6C9CE"
+            const color = mode === "fournisseurs" ? (d as any).color : "var(--accent)"
             return (
-              <tr key={i} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)" }}>
+              <tr
+                key={i}
+                onClick={() => onSelectItem(d.name)}
+                style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }}
+                onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+              >
                 <td style={{ ...tdStyle, color: "var(--text-muted)", fontFamily: "monospace" }}>{i + 1}</td>
                 <td style={{ ...tdStyle, fontWeight: 500 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -951,7 +1038,20 @@ function BigPie({ data, colors, total, totalLabel, formatter, double }: {
           <PieChart>
             {double ? (
               <>
-                <Pie data={data as any[]} dataKey="amount" nameKey="name" cx="50%" cy="50%" innerRadius="48%" outerRadius="68%" paddingAngle={2} strokeWidth={0}>
+                <Pie
+                  data={data as any[]} dataKey="amount" nameKey="name" cx="50%" cy="50%"
+                  innerRadius="48%" outerRadius="65%" paddingAngle={2} strokeWidth={0}
+                  label={({ cx, cy, midAngle, outerRadius: or, name, value }: any) => {
+                    const pct = sum > 0 ? ((value / sum) * 100).toFixed(0) : "0"
+                    if (Number(pct) < 3) return null
+                    const R = Math.PI / 180; const cos = Math.cos(-midAngle * R); const sin = Math.sin(-midAngle * R)
+                    const mx = cx + (or + 12) * cos; const my = cy + (or + 12) * sin
+                    const ex = cx + (or + 40) * cos; const ey = cy + (or + 40) * sin
+                    const tx = ex + (cos >= 0 ? 6 : -6); const a = cos >= 0 ? "start" : "end"
+                    const sn = String(name).length > 18 ? String(name).slice(0, 16) + "…" : name
+                    return (<g><line x1={mx} y1={my} x2={ex} y2={ey} stroke="var(--text-muted)" strokeWidth={1} opacity={0.5} /><text x={tx} y={ey - 4} textAnchor={a} fill="var(--text-muted)" fontSize={11}>{sn}</text><text x={tx} y={ey + 12} textAnchor={a} fill="var(--text-primary)" fontSize={12} fontWeight={700} fontFamily="monospace">{pct}%</text></g>)
+                  }} labelLine={false}
+                >
                   {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
                 </Pie>
                 <Pie data={data as any[]} dataKey="count" nameKey="name" cx="50%" cy="50%" innerRadius="28%" outerRadius="42%" paddingAngle={2} strokeWidth={0}>
@@ -961,7 +1061,20 @@ function BigPie({ data, colors, total, totalLabel, formatter, double }: {
               </>
             ) : (
               <>
-                <Pie data={data as any[]} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius="48%" outerRadius="75%" paddingAngle={2} strokeWidth={0}>
+                <Pie
+                  data={data as any[]} dataKey="value" nameKey="name" cx="50%" cy="50%"
+                  innerRadius="48%" outerRadius="72%" paddingAngle={2} strokeWidth={0}
+                  label={({ cx, cy, midAngle, outerRadius: or, name, value }: any) => {
+                    const pct = sum > 0 ? ((value / sum) * 100).toFixed(0) : "0"
+                    if (Number(pct) < 3) return null
+                    const R = Math.PI / 180; const cos = Math.cos(-midAngle * R); const sin = Math.sin(-midAngle * R)
+                    const mx = cx + (or + 12) * cos; const my = cy + (or + 12) * sin
+                    const ex = cx + (or + 40) * cos; const ey = cy + (or + 40) * sin
+                    const tx = ex + (cos >= 0 ? 6 : -6); const a = cos >= 0 ? "start" : "end"
+                    const sn = String(name).length > 20 ? String(name).slice(0, 18) + "…" : name
+                    return (<g><line x1={mx} y1={my} x2={ex} y2={ey} stroke="var(--text-muted)" strokeWidth={1} opacity={0.5} /><text x={tx} y={ey - 4} textAnchor={a} fill="var(--text-muted)" fontSize={11}>{sn}</text><text x={tx} y={ey + 12} textAnchor={a} fill="var(--text-primary)" fontSize={12} fontWeight={700} fontFamily="monospace">{pct}%</text></g>)
+                  }} labelLine={false}
+                >
                   {data.map((_, i) => <Cell key={i} fill={colors[i % colors.length]} />)}
                 </Pie>
                 <Tooltip content={<CTooltip formatter={(v: any) => formatter(Number(v))} />} />
@@ -1388,6 +1501,105 @@ function DepenseModal({ depense, onClose, onSave, saving }: {
             {saving ? "Sauvegarde…" : "Enregistrer"}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+function TopItemDetailModal({ mode, name, projects, depenses, onClose, onSelectProject, onSelectDepense }: {
+  mode: "clients" | "fournisseurs"
+  name: string
+  projects: Project[]
+  depenses: Depense[]
+  onClose: () => void
+  onSelectProject: (p: Project) => void
+  onSelectDepense: (d: Depense) => void
+}) {
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", h)
+    return () => document.removeEventListener("keydown", h)
+  }, [onClose])
+
+  const sortedP = [...projects].sort((a, b) => toMUR(b.finalAmount, b.currency) - toMUR(a.finalAmount, a.currency))
+  const sortedD = [...depenses].sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+  const totalP = sortedP.reduce((s, p) => s + toMUR(p.finalAmount, p.currency), 0)
+  const totalD = sortedD.reduce((s, d) => s + d.montantMUR, 0)
+
+  return (
+    <div style={modalOverlay} onClick={onClose}>
+      <div style={{ ...modalBox, maxWidth: 880, width: "90vw" }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+          <div>
+            <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600 }}>
+              {mode === "clients" ? "Client" : "Fournisseur"}
+            </div>
+            <div style={{ fontSize: "var(--fs-xl)", fontWeight: 700, color: "var(--text-primary)", marginTop: 2 }}>{name}</div>
+            <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 4 }}>
+              {mode === "clients"
+                ? `${sortedP.length} projet(s) · ${Math.round(totalP).toLocaleString("fr-FR")} MUR`
+                : `${sortedD.length} dépense(s) · ${Math.round(totalD).toLocaleString("fr-FR")} MUR`}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18 }}>✕</button>
+        </div>
+
+        {mode === "clients" ? (
+          sortedP.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>Aucun projet</div>
+          ) : (
+            <div style={{ maxHeight: "70vh", overflowY: "auto", border: "1px solid rgba(166,201,206,0.10)", borderRadius: 8 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+                <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--bg-card)" }}>
+                  <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                    {["Date", "Projet", "Type", "Status", "Montant", "MUR"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedP.map((p, i) => (
+                    <tr key={p.id || i} onClick={() => onSelectProject(p)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{p.startDate || "—"}</td>
+                      <td style={{ ...tdStyle, fontWeight: 500 }}>{p.name}</td>
+                      <td style={tdStyle}><span style={{ background: "var(--accent-soft)", color: "var(--accent)", padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{p.type}</span></td>
+                      <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status}</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 600 }}>{Math.round(p.finalAmount).toLocaleString("fr-FR")} {p.currency}</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "var(--accent)" }}>{Math.round(toMUR(p.finalAmount, p.currency)).toLocaleString("fr-FR")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        ) : (
+          sortedD.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>Aucune dépense</div>
+          ) : (
+            <div style={{ maxHeight: "70vh", overflowY: "auto", border: "1px solid rgba(166,201,206,0.10)", borderRadius: 8 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+                <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--bg-card)" }}>
+                  <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                    {["Date", "Description", "Catégorie", "Montant", "MUR"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedD.map((d, i) => (
+                    <tr key={d.id || i} onClick={() => onSelectDepense(d)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{d.date || "—"}</td>
+                      <td style={{ ...tdStyle, fontWeight: 500 }}>{d.description}</td>
+                      <td style={tdStyle}>
+                        {d.categorie ? (
+                          <span style={{ background: `${CAT_COLORS[d.categorie] || "#6b7280"}22`, color: CAT_COLORS[d.categorie] || "#6b7280", padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{d.categorie}</span>
+                        ) : "—"}
+                      </td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 600 }}>{d.montant.toLocaleString("fr-FR")} {d.devise}</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "var(--accent)" }}>{Math.round(d.montantMUR).toLocaleString("fr-FR")}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        )}
       </div>
     </div>
   )
