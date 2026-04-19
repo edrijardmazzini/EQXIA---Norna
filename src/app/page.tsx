@@ -89,6 +89,9 @@ export default function DashboardPage() {
   const hoverDepRef = useRef<string | null>(null)
   const revChartRef = useRef<HTMLDivElement | null>(null)
   const depChartRef = useRef<HTMLDivElement | null>(null)
+  // Filtres de mois pour listes fullscreen ("" = tous les mois)
+  const [revFsFilterMois, setRevFsFilterMois] = useState<string>("")
+  const [depFsFilterMois, setDepFsFilterMois] = useState<string>("")
   const [topDetailItem, setTopDetailItem] = useState<{ mode: "clients" | "fournisseurs"; name: string } | null>(null)
 
   // Escape pour défiger + clic en dehors des charts pour défiger
@@ -535,67 +538,67 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* ── Row 1: Dépenses par catégorie + Dépenses mensuelles ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 16, marginBottom: 16 }}>
-            <div style={{ order: 2, minWidth: 0 }}>
+          {/* ── Rows Revenus + Dépenses (ordre vertical : Revenus au-dessus) ── */}
+          <div style={{ display: "flex", flexDirection: "column" }}>
+
+          {/* ── Row Dépenses: mensuelles + par catégorie ── */}
+          <div data-row="depenses" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16, order: 2 }}>
             <ChartCard
               title="Dépenses mensuelles"
               sub="Survolez un mois · cliquez pour figer"
               value={`${Math.round(depTotalAll).toLocaleString("fr-FR")} MUR`}
               expandable
               renderExpanded={() => {
-                const depListRaw = currentDepMois ? (depListByDossier[currentDepMois] || []) : []
-                const depList = [...depListRaw].sort((a, b) => b.montantMUR - a.montantMUR)
-                const totalMois = depList.reduce((s, d) => s + d.montantMUR, 0)
+                const filterMois = pinnedDepMois || depFsFilterMois
+                const allMonthCodes = [...new Set(depenses.map(d => d.dossier).filter(Boolean))].sort().reverse()
+                const listItems = (filterMois ? depenses.filter(d => d.dossier === filterMois) : depenses)
+                  .slice()
+                  .sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+                const listTotal = listItems.reduce((s, d) => s + d.montantMUR, 0)
                 return (
-                  <div style={{ display: "flex", flexDirection: "row", gap: 20, height: "100%", width: "100%" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16, height: "100%", width: "100%", minHeight: 0 }}>
+                    {/* Chart + légende en haut */}
                     <div
                       ref={depChartRef}
-                      style={{ flex: "1.8 1 0", minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0, cursor: "pointer" }}
+                      style={{ flexShrink: 0, cursor: "pointer" }}
                       onClick={(e) => {
                         const target = e.target as HTMLElement
-                        if (target.closest('button')) return
+                        if (target.closest('button') || target.closest('select') || target.closest('input')) return
                         const code = hoverDepRef.current
                         if (code) setPinnedDepMois(prev => prev === code ? null : code)
                       }}
                     >
-                      <div style={{ flex: 1, minHeight: 0 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart
-                            data={depParMois}
-                            onMouseMove={(e: any) => {
-                              const code = e?.activePayload?.[0]?.payload?.dossier
-                              if (code) {
-                                hoverDepRef.current = code
-                                if (!pinnedDepMois && code !== hoverDepMois) setHoverDepMois(code)
-                              }
-                            }}
-                            onMouseLeave={() => { if (!pinnedDepMois) { hoverDepRef.current = null; setHoverDepMois(null) } }}
-                            onClick={(e: any) => {
-                              const code = e?.activePayload?.[0]?.payload?.dossier || hoverDepRef.current
-                              if (code) setPinnedDepMois(prev => prev === code ? null : code)
-                            }}
-                            style={{ cursor: "pointer" }}
-                          >
-                            <defs>
-                              {allCats.map((cat, i) => {
-                                const color = PIE_CAT[i % PIE_CAT.length]
-                                return <linearGradient key={cat} id={`gCatFs${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.5} /><stop offset="100%" stopColor={color} stopOpacity={0.05} /></linearGradient>
-                              })}
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
-                            <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
-                            <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-                            <Tooltip content={<CTooltip formatter={fmt} />} />
-                            {allCats.map((cat, i) => (
-                              <Area key={cat} type="monotone" dataKey={cat} stackId="1" stroke={PIE_CAT[i % PIE_CAT.length]} strokeWidth={0.5} fill={`url(#gCatFs${i})`} />
-                            ))}
-                            {currentDepMois && <ReferenceLine x={fmtDossier(currentDepMois)} stroke={pinnedDepMois ? "var(--accent)" : "rgba(166,201,206,0.4)"} strokeWidth={pinnedDepMois ? 2 : 1} strokeDasharray={pinnedDepMois ? "0" : "3 3"} />}
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
-                      {/* Légende en bas-gauche */}
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: "12px 0 0", borderTop: "1px solid rgba(166,201,206,0.08)", marginTop: 8 }}>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <AreaChart
+                          data={depParMois}
+                          onMouseMove={(e: any) => {
+                            const code = e?.activePayload?.[0]?.payload?.dossier
+                            if (code) {
+                              hoverDepRef.current = code
+                              if (!pinnedDepMois && code !== hoverDepMois) setHoverDepMois(code)
+                            }
+                          }}
+                          onMouseLeave={() => { if (!pinnedDepMois) { hoverDepRef.current = null; setHoverDepMois(null) } }}
+                          style={{ cursor: "pointer" }}
+                        >
+                          <defs>
+                            {allCats.map((cat, i) => {
+                              const color = PIE_CAT[i % PIE_CAT.length]
+                              return <linearGradient key={cat} id={`gCatFs${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.5} /><stop offset="100%" stopColor={color} stopOpacity={0.05} /></linearGradient>
+                            })}
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+                          <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+                          <Tooltip content={<CTooltip formatter={fmt} />} />
+                          {allCats.map((cat, i) => (
+                            <Area key={cat} type="monotone" dataKey={cat} stackId="1" stroke={PIE_CAT[i % PIE_CAT.length]} strokeWidth={0.5} fill={`url(#gCatFs${i})`} />
+                          ))}
+                          {currentDepMois && <ReferenceLine x={fmtDossier(currentDepMois)} stroke={pinnedDepMois ? "var(--accent)" : "rgba(166,201,206,0.4)"} strokeWidth={pinnedDepMois ? 2 : 1} strokeDasharray={pinnedDepMois ? "0" : "3 3"} />}
+                        </AreaChart>
+                      </ResponsiveContainer>
+                      {/* Légende sous le chart */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: "10px 0 0", borderTop: "1px solid rgba(166,201,206,0.08)", marginTop: 8 }}>
                         {allCats.map((cat, i) => (
                           <div key={cat} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-2xs)" }}>
                             <span style={{ width: 10, height: 10, borderRadius: 2, background: PIE_CAT[i % PIE_CAT.length] }} />
@@ -604,17 +607,73 @@ export default function DashboardPage() {
                         ))}
                       </div>
                     </div>
-                    <div style={{ flex: "1 1 0", minWidth: 0, background: "var(--bg-card)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                      <MonthDetailPanel
-                        mode="depenses"
-                        moisCode={currentDepMois}
-                        isPinned={!!pinnedDepMois}
-                        onUnpin={() => setPinnedDepMois(null)}
-                        total={totalMois}
-                        items={depList}
-                        depCategoryColors={depCategoryColors}
-                        onSelectDepense={(d) => setEditDepense(d)}
-                      />
+
+                    {/* Liste en bas avec filtre mois */}
+                    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: "var(--bg-card)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 10, overflow: "hidden" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 16px", borderBottom: "1px solid rgba(166,201,206,0.12)", flexShrink: 0, flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <div style={{ fontSize: "var(--fs-sm)", fontWeight: 600, color: "var(--text-primary)" }}>
+                            {listItems.length} dépense{listItems.length > 1 ? "s" : ""}
+                          </div>
+                          <div style={{ fontSize: "var(--fs-xs)", color: "#ef4444", fontFamily: "monospace", fontWeight: 700 }}>
+                            {Math.round(listTotal).toLocaleString("fr-FR")} MUR
+                          </div>
+                          {pinnedDepMois && (
+                            <span style={{ fontSize: "var(--fs-2xs)", color: "var(--accent)", fontWeight: 600, background: "var(--accent-soft)", padding: "2px 8px", borderRadius: 4 }}>
+                              📌 Figé : {fmtDossier(pinnedDepMois)}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <label style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 500 }}>Filtrer par mois :</label>
+                          <select
+                            value={depFsFilterMois}
+                            onChange={e => { setDepFsFilterMois(e.target.value); setPinnedDepMois(null) }}
+                            style={{ padding: "4px 8px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit", outline: "none" }}
+                          >
+                            <option value="">Tous les mois</option>
+                            {allMonthCodes.map(c => <option key={c} value={c}>{fmtDossier(c)}</option>)}
+                          </select>
+                          {(depFsFilterMois || pinnedDepMois) && (
+                            <button
+                              onClick={() => { setDepFsFilterMois(""); setPinnedDepMois(null) }}
+                              style={{ background: "none", border: "1px solid var(--border-subtle)", color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "4px 8px", borderRadius: 4, fontFamily: "inherit" }}
+                            >
+                              Réinitialiser
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+                          <thead style={{ position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 2 }}>
+                            <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                              {["Date", "Description", "Fournisseur", "Catégorie", "Montant", "MUR"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {listItems.length === 0 ? (
+                              <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--text-muted)", fontStyle: "italic" }}>Aucune dépense pour ce filtre</td></tr>
+                            ) : listItems.map((d, i) => {
+                              const c = (d.categorie && depCategoryColors[d.categorie]) || "#6b7280"
+                              return (
+                                <tr key={d.id || i} onClick={() => setEditDepense(d)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                                  <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{d.date || "—"}</td>
+                                  <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.description}</td>
+                                  <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{d.fournisseur}</td>
+                                  <td style={tdStyle}>
+                                    {d.categorie ? (
+                                      <span style={{ background: `${c}22`, color: c, padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{d.categorie}</span>
+                                    ) : "—"}
+                                  </td>
+                                  <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 600 }}>{d.montant.toLocaleString("fr-FR")} {d.devise}</td>
+                                  <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "#ef4444" }}>{Math.round(d.montantMUR).toLocaleString("fr-FR")}</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 )
@@ -668,8 +727,7 @@ export default function DashboardPage() {
                 )}
               </div>
             </ChartCard>
-            </div>
-            <div style={{ order: 1, minWidth: 0 }}>
+
             <ChartCard
               title="Dépenses par catégorie"
               expandable
@@ -703,12 +761,10 @@ export default function DashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
             </ChartCard>
-            </div>
           </div>
 
-          {/* ── Row 2: Revenus par type + Revenus mensuels ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 16, marginBottom: 16 }}>
-            <div style={{ order: 2, minWidth: 0 }}>
+          {/* ── Row Revenus: mensuels + par type ── */}
+          <div data-row="revenus" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16, order: 1 }}>
             <ChartCard
               title="Revenus mensuels"
               sub="Survolez un mois · cliquez pour figer"
@@ -716,62 +772,62 @@ export default function DashboardPage() {
               expandable
               right={<Seg value={revMode} onChange={v => setRevMode(v as any)} options={[["total", "Total"], ["types", "Par types"]]} />}
               renderExpanded={() => {
-                const ventesMois = currentRevMois ? (ventesListByMois[currentRevMois] || []) : []
-                const totalMois = ventesMois.reduce((s, p) => s + toMUR(p.finalAmount, p.currency), 0)
+                const filterMois = pinnedRevMois || revFsFilterMois
+                const wonProjects = projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status) && p.finalAmount > 0)
+                const allVentesMonths = [...new Set(wonProjects.map(p => dossierFromDate(p.startDate)).filter(Boolean))].sort().reverse()
+                const listItems = (filterMois ? wonProjects.filter(p => dossierFromDate(p.startDate) === filterMois) : wonProjects)
+                  .slice()
+                  .sort((a, b) => (b.startDate || "").localeCompare(a.startDate || ""))
+                const listTotal = listItems.reduce((s, p) => s + toMUR(p.finalAmount, p.currency), 0)
                 return (
-                  <div style={{ display: "flex", flexDirection: "row", gap: 20, height: "100%", width: "100%" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 16, height: "100%", width: "100%", minHeight: 0 }}>
+                    {/* Chart + légende en haut */}
                     <div
                       ref={revChartRef}
-                      style={{ flex: "1.8 1 0", minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0, cursor: "pointer" }}
+                      style={{ flexShrink: 0, cursor: "pointer" }}
                       onClick={(e) => {
                         const target = e.target as HTMLElement
-                        if (target.closest('button')) return
+                        if (target.closest('button') || target.closest('select') || target.closest('input')) return
                         const code = hoverRevRef.current
                         if (code) setPinnedRevMois(prev => prev === code ? null : code)
                       }}
                     >
-                      <div style={{ flex: 1, minHeight: 0 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart
-                            data={revMode === "types" ? revParMoisParType.data : revParMois}
-                            onMouseMove={(e: any) => {
-                              const code = e?.activePayload?.[0]?.payload?.mois
-                              if (code) {
-                                hoverRevRef.current = code
-                                if (!pinnedRevMois && code !== hoverRevMois) setHoverRevMois(code)
-                              }
-                            }}
-                            onMouseLeave={() => { if (!pinnedRevMois) { hoverRevRef.current = null; setHoverRevMois(null) } }}
-                            onClick={(e: any) => {
-                              const code = e?.activePayload?.[0]?.payload?.mois || hoverRevRef.current
-                              if (code) setPinnedRevMois(prev => prev === code ? null : code)
-                            }}
-                            style={{ cursor: "pointer" }}
-                          >
-                            <defs>
-                              <linearGradient id="gRev2Fs" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A6C9CE" stopOpacity={0.4} /><stop offset="100%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient>
-                              {revParMoisParType.types.map((t, i) => {
-                                const color = PIE_TYPE[i % PIE_TYPE.length]
-                                return <linearGradient key={t} id={`gRevTypeFs${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.5} /><stop offset="100%" stopColor={color} stopOpacity={0.05} /></linearGradient>
-                              })}
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
-                            <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
-                            <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-                            <Tooltip content={<RevenueTooltip ventesListByMois={ventesListByMois} />} />
-                            {revMode === "total" ? (
-                              <Area type="monotone" dataKey="revenus" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev2Fs)" dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#A6C9CE", strokeWidth: 0 }} />
-                            ) : (
-                              revParMoisParType.types.map((t, i) => (
-                                <Area key={t} type="monotone" dataKey={t} stackId="revtypesfs" stroke={PIE_TYPE[i % PIE_TYPE.length]} strokeWidth={1} fill={`url(#gRevTypeFs${i})`} />
-                              ))
-                            )}
-                            {currentRevMois && <ReferenceLine x={fmtDossier(currentRevMois)} stroke={pinnedRevMois ? "var(--accent)" : "rgba(166,201,206,0.4)"} strokeWidth={pinnedRevMois ? 2 : 1} strokeDasharray={pinnedRevMois ? "0" : "3 3"} />}
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
-                      {/* Légende en bas-gauche */}
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: "12px 0 0", borderTop: "1px solid rgba(166,201,206,0.08)", marginTop: 8 }}>
+                      <ResponsiveContainer width="100%" height={300}>
+                        <AreaChart
+                          data={revMode === "types" ? revParMoisParType.data : revParMois}
+                          onMouseMove={(e: any) => {
+                            const code = e?.activePayload?.[0]?.payload?.mois
+                            if (code) {
+                              hoverRevRef.current = code
+                              if (!pinnedRevMois && code !== hoverRevMois) setHoverRevMois(code)
+                            }
+                          }}
+                          onMouseLeave={() => { if (!pinnedRevMois) { hoverRevRef.current = null; setHoverRevMois(null) } }}
+                          style={{ cursor: "pointer" }}
+                        >
+                          <defs>
+                            <linearGradient id="gRev2Fs" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A6C9CE" stopOpacity={0.4} /><stop offset="100%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient>
+                            {revParMoisParType.types.map((t, i) => {
+                              const color = PIE_TYPE[i % PIE_TYPE.length]
+                              return <linearGradient key={t} id={`gRevTypeFs${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.5} /><stop offset="100%" stopColor={color} stopOpacity={0.05} /></linearGradient>
+                            })}
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+                          <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
+                          <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+                          <Tooltip content={<RevenueTooltip ventesListByMois={ventesListByMois} />} />
+                          {revMode === "total" ? (
+                            <Area type="monotone" dataKey="revenus" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev2Fs)" dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#A6C9CE", strokeWidth: 0 }} />
+                          ) : (
+                            revParMoisParType.types.map((t, i) => (
+                              <Area key={t} type="monotone" dataKey={t} stackId="revtypesfs" stroke={PIE_TYPE[i % PIE_TYPE.length]} strokeWidth={1} fill={`url(#gRevTypeFs${i})`} />
+                            ))
+                          )}
+                          {currentRevMois && <ReferenceLine x={fmtDossier(currentRevMois)} stroke={pinnedRevMois ? "var(--accent)" : "rgba(166,201,206,0.4)"} strokeWidth={pinnedRevMois ? 2 : 1} strokeDasharray={pinnedRevMois ? "0" : "3 3"} />}
+                        </AreaChart>
+                      </ResponsiveContainer>
+                      {/* Légende sous le chart */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: "10px 0 0", borderTop: "1px solid rgba(166,201,206,0.08)", marginTop: 8 }}>
                         {revMode === "types" ? (
                           revParMoisParType.types.map((t, i) => (
                             <div key={t} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-2xs)" }}>
@@ -787,17 +843,74 @@ export default function DashboardPage() {
                         )}
                       </div>
                     </div>
-                    <div style={{ flex: "1 1 0", minWidth: 0, background: "var(--bg-card)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-                      <MonthDetailPanel
-                        mode="revenus"
-                        moisCode={currentRevMois}
-                        isPinned={!!pinnedRevMois}
-                        onUnpin={() => setPinnedRevMois(null)}
-                        total={totalMois}
-                        items={ventesMois}
-                        projectTypeColors={projectTypeColors}
-                        onSelectProject={(p) => setEditProject(p)}
-                      />
+
+                    {/* Liste en bas avec filtre mois */}
+                    <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: "var(--bg-card)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 10, overflow: "hidden" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, padding: "12px 16px", borderBottom: "1px solid rgba(166,201,206,0.12)", flexShrink: 0, flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <div style={{ fontSize: "var(--fs-sm)", fontWeight: 600, color: "var(--text-primary)" }}>
+                            {listItems.length} vente{listItems.length > 1 ? "s" : ""}
+                          </div>
+                          <div style={{ fontSize: "var(--fs-xs)", color: "var(--accent)", fontFamily: "monospace", fontWeight: 700 }}>
+                            {Math.round(listTotal).toLocaleString("fr-FR")} MUR
+                          </div>
+                          {pinnedRevMois && (
+                            <span style={{ fontSize: "var(--fs-2xs)", color: "var(--accent)", fontWeight: 600, background: "var(--accent-soft)", padding: "2px 8px", borderRadius: 4 }}>
+                              📌 Figé : {fmtDossier(pinnedRevMois)}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <label style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 500 }}>Filtrer par mois :</label>
+                          <select
+                            value={revFsFilterMois}
+                            onChange={e => { setRevFsFilterMois(e.target.value); setPinnedRevMois(null) }}
+                            style={{ padding: "4px 8px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit", outline: "none" }}
+                          >
+                            <option value="">Tous les mois</option>
+                            {allVentesMonths.map(c => <option key={c} value={c}>{fmtDossier(c)}</option>)}
+                          </select>
+                          {(revFsFilterMois || pinnedRevMois) && (
+                            <button
+                              onClick={() => { setRevFsFilterMois(""); setPinnedRevMois(null) }}
+                              style={{ background: "none", border: "1px solid var(--border-subtle)", color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "4px 8px", borderRadius: 4, fontFamily: "inherit" }}
+                            >
+                              Réinitialiser
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+                          <thead style={{ position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 2 }}>
+                            <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                              {["Date", "Projet", "Client", "Type", "Status", "Montant", "MUR"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {listItems.length === 0 ? (
+                              <tr><td colSpan={7} style={{ textAlign: "center", padding: 32, color: "var(--text-muted)", fontStyle: "italic" }}>Aucune vente pour ce filtre</td></tr>
+                            ) : listItems.map((p, i) => {
+                              const c = (p.type && projectTypeColors[p.type]) || "#A6C9CE"
+                              return (
+                                <tr key={p.id || i} onClick={() => setEditProject(p)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                                  <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{p.startDate || "—"}</td>
+                                  <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</td>
+                                  <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName}</td>
+                                  <td style={tdStyle}>
+                                    {p.type ? (
+                                      <span style={{ background: `${c}22`, color: c, padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{p.type}</span>
+                                    ) : "—"}
+                                  </td>
+                                  <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status}</td>
+                                  <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 600 }}>{Math.round(p.finalAmount).toLocaleString("fr-FR")} {p.currency}</td>
+                                  <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "var(--accent)" }}>{Math.round(toMUR(p.finalAmount, p.currency)).toLocaleString("fr-FR")}</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   </div>
                 )
@@ -857,8 +970,7 @@ export default function DashboardPage() {
                 )}
               </div>
             </ChartCard>
-            </div>
-            <div style={{ order: 1, minWidth: 0 }}>
+
             <ChartCard
               title="Revenus par type de projet"
               expandable
@@ -902,8 +1014,10 @@ export default function DashboardPage() {
                 </div>
               </div>
             </ChartCard>
-            </div>
           </div>
+
+          </div>
+          {/* ── Fin wrapper flex Revenus/Dépenses ── */}
 
           {/* ── Row 3: Top fournisseurs/clients + Rentabilité ── */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
