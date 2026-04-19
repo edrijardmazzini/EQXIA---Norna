@@ -85,6 +85,8 @@ export default function DashboardPage() {
   const [hoverRevMois, setHoverRevMois] = useState<string | null>(null)
   const [pinnedDepMois, setPinnedDepMois] = useState<string | null>(null)
   const [hoverDepMois, setHoverDepMois] = useState<string | null>(null)
+  const hoverRevRef = useRef<string | null>(null)
+  const hoverDepRef = useRef<string | null>(null)
   const revChartRef = useRef<HTMLDivElement | null>(null)
   const depChartRef = useRef<HTMLDivElement | null>(null)
   const [topDetailItem, setTopDetailItem] = useState<{ mode: "clients" | "fournisseurs"; name: string } | null>(null)
@@ -533,8 +535,9 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* ── Row 1: Dépenses mensuelles + Par catégorie ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16 }}>
+          {/* ── Row 1: Dépenses par catégorie + Dépenses mensuelles ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 16, marginBottom: 16 }}>
+            <div style={{ order: 2, minWidth: 0 }}>
             <ChartCard
               title="Dépenses mensuelles"
               sub="Survolez un mois · cliquez pour figer"
@@ -545,19 +548,31 @@ export default function DashboardPage() {
                 const depList = [...depListRaw].sort((a, b) => b.montantMUR - a.montantMUR)
                 const totalMois = depList.reduce((s, d) => s + d.montantMUR, 0)
                 return (
-                  <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: 20, height: "100%", minHeight: 0 }}>
-                    <div ref={depChartRef} style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+                  <div style={{ display: "flex", flexDirection: "row", gap: 20, height: "100%", width: "100%" }}>
+                    <div
+                      ref={depChartRef}
+                      style={{ flex: "1.8 1 0", minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0, cursor: "pointer" }}
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement
+                        if (target.closest('button')) return
+                        const code = hoverDepRef.current
+                        if (code) setPinnedDepMois(prev => prev === code ? null : code)
+                      }}
+                    >
                       <div style={{ flex: 1, minHeight: 0 }}>
                         <ResponsiveContainer width="100%" height="100%">
                           <AreaChart
                             data={depParMois}
                             onMouseMove={(e: any) => {
                               const code = e?.activePayload?.[0]?.payload?.dossier
-                              if (code && !pinnedDepMois) setHoverDepMois(code)
+                              if (code) {
+                                hoverDepRef.current = code
+                                if (!pinnedDepMois && code !== hoverDepMois) setHoverDepMois(code)
+                              }
                             }}
-                            onMouseLeave={() => { if (!pinnedDepMois) setHoverDepMois(null) }}
+                            onMouseLeave={() => { if (!pinnedDepMois) { hoverDepRef.current = null; setHoverDepMois(null) } }}
                             onClick={(e: any) => {
-                              const code = e?.activePayload?.[0]?.payload?.dossier
+                              const code = e?.activePayload?.[0]?.payload?.dossier || hoverDepRef.current
                               if (code) setPinnedDepMois(prev => prev === code ? null : code)
                             }}
                             style={{ cursor: "pointer" }}
@@ -589,7 +604,7 @@ export default function DashboardPage() {
                         ))}
                       </div>
                     </div>
-                    <div style={{ background: "var(--bg-card)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                    <div style={{ flex: "1 1 0", minWidth: 0, background: "var(--bg-card)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" }}>
                       <MonthDetailPanel
                         mode="depenses"
                         moisCode={currentDepMois}
@@ -605,17 +620,29 @@ export default function DashboardPage() {
                 )
               }}
             >
-              <div ref={depChartRef} style={{ position: "relative" }}>
+              <div
+                ref={depChartRef}
+                style={{ position: "relative", cursor: "pointer" }}
+                onClick={(e) => {
+                  const target = e.target as HTMLElement
+                  if (target.closest('button')) return
+                  const code = hoverDepRef.current
+                  if (code) setPinnedDepMois(prev => prev === code ? null : code)
+                }}
+              >
                 <ResponsiveContainer width="100%" height={280}>
                   <AreaChart
                     data={depParMois}
                     onMouseMove={(e: any) => {
                       const code = e?.activePayload?.[0]?.payload?.dossier
-                      if (code && !pinnedDepMois) setHoverDepMois(code)
+                      if (code) {
+                        hoverDepRef.current = code
+                        if (!pinnedDepMois && code !== hoverDepMois) setHoverDepMois(code)
+                      }
                     }}
-                    onMouseLeave={() => { if (!pinnedDepMois) setHoverDepMois(null) }}
+                    onMouseLeave={() => { if (!pinnedDepMois) { hoverDepRef.current = null; setHoverDepMois(null) } }}
                     onClick={(e: any) => {
-                      const code = e?.activePayload?.[0]?.payload?.dossier
+                      const code = e?.activePayload?.[0]?.payload?.dossier || hoverDepRef.current
                       if (code) setPinnedDepMois(prev => prev === code ? null : code)
                     }}
                     style={{ cursor: "pointer" }}
@@ -641,7 +668,8 @@ export default function DashboardPage() {
                 )}
               </div>
             </ChartCard>
-
+            </div>
+            <div style={{ order: 1, minWidth: 0 }}>
             <ChartCard
               title="Dépenses par catégorie"
               expandable
@@ -649,7 +677,7 @@ export default function DashboardPage() {
               renderExpanded={() => (
                 <BigPie
                   data={depParCat}
-                  colors={depParCat.map(d => CAT_COLORS[d.name] || PIE_CAT[0])}
+                  colors={depParCat.map((_, i) => PIE_CAT[i % PIE_CAT.length])}
                   total={depTotalAll}
                   totalLabel="Dépenses totales"
                   formatter={v => `${Math.round(v).toLocaleString("fr-FR")} MUR`}
@@ -675,10 +703,12 @@ export default function DashboardPage() {
                 </PieChart>
               </ResponsiveContainer>
             </ChartCard>
+            </div>
           </div>
 
-          {/* ── Row 2: Revenus mensuels + Par type double donut ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16 }}>
+          {/* ── Row 2: Revenus par type + Revenus mensuels ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 16, marginBottom: 16 }}>
+            <div style={{ order: 2, minWidth: 0 }}>
             <ChartCard
               title="Revenus mensuels"
               sub="Survolez un mois · cliquez pour figer"
@@ -689,19 +719,31 @@ export default function DashboardPage() {
                 const ventesMois = currentRevMois ? (ventesListByMois[currentRevMois] || []) : []
                 const totalMois = ventesMois.reduce((s, p) => s + toMUR(p.finalAmount, p.currency), 0)
                 return (
-                  <div style={{ display: "grid", gridTemplateColumns: "1.8fr 1fr", gap: 20, height: "100%", minHeight: 0 }}>
-                    <div ref={revChartRef} style={{ display: "flex", flexDirection: "column", minHeight: 0 }}>
+                  <div style={{ display: "flex", flexDirection: "row", gap: 20, height: "100%", width: "100%" }}>
+                    <div
+                      ref={revChartRef}
+                      style={{ flex: "1.8 1 0", minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0, cursor: "pointer" }}
+                      onClick={(e) => {
+                        const target = e.target as HTMLElement
+                        if (target.closest('button')) return
+                        const code = hoverRevRef.current
+                        if (code) setPinnedRevMois(prev => prev === code ? null : code)
+                      }}
+                    >
                       <div style={{ flex: 1, minHeight: 0 }}>
                         <ResponsiveContainer width="100%" height="100%">
                           <AreaChart
                             data={revMode === "types" ? revParMoisParType.data : revParMois}
                             onMouseMove={(e: any) => {
                               const code = e?.activePayload?.[0]?.payload?.mois
-                              if (code && !pinnedRevMois) setHoverRevMois(code)
+                              if (code) {
+                                hoverRevRef.current = code
+                                if (!pinnedRevMois && code !== hoverRevMois) setHoverRevMois(code)
+                              }
                             }}
-                            onMouseLeave={() => { if (!pinnedRevMois) setHoverRevMois(null) }}
+                            onMouseLeave={() => { if (!pinnedRevMois) { hoverRevRef.current = null; setHoverRevMois(null) } }}
                             onClick={(e: any) => {
-                              const code = e?.activePayload?.[0]?.payload?.mois
+                              const code = e?.activePayload?.[0]?.payload?.mois || hoverRevRef.current
                               if (code) setPinnedRevMois(prev => prev === code ? null : code)
                             }}
                             style={{ cursor: "pointer" }}
@@ -745,7 +787,7 @@ export default function DashboardPage() {
                         )}
                       </div>
                     </div>
-                    <div style={{ background: "var(--bg-card)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+                    <div style={{ flex: "1 1 0", minWidth: 0, background: "var(--bg-card)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 10, overflow: "hidden", display: "flex", flexDirection: "column" }}>
                       <MonthDetailPanel
                         mode="revenus"
                         moisCode={currentRevMois}
@@ -761,17 +803,29 @@ export default function DashboardPage() {
                 )
               }}
             >
-              <div ref={revChartRef} style={{ position: "relative" }}>
+              <div
+                ref={revChartRef}
+                style={{ position: "relative", cursor: "pointer" }}
+                onClick={(e) => {
+                  const target = e.target as HTMLElement
+                  if (target.closest('button')) return
+                  const code = hoverRevRef.current
+                  if (code) setPinnedRevMois(prev => prev === code ? null : code)
+                }}
+              >
                 <ResponsiveContainer width="100%" height={280}>
                   <AreaChart
                     data={revMode === "types" ? revParMoisParType.data : revParMois}
                     onMouseMove={(e: any) => {
                       const code = e?.activePayload?.[0]?.payload?.mois
-                      if (code && !pinnedRevMois) setHoverRevMois(code)
+                      if (code) {
+                        hoverRevRef.current = code
+                        if (!pinnedRevMois && code !== hoverRevMois) setHoverRevMois(code)
+                      }
                     }}
-                    onMouseLeave={() => { if (!pinnedRevMois) setHoverRevMois(null) }}
+                    onMouseLeave={() => { if (!pinnedRevMois) { hoverRevRef.current = null; setHoverRevMois(null) } }}
                     onClick={(e: any) => {
-                      const code = e?.activePayload?.[0]?.payload?.mois
+                      const code = e?.activePayload?.[0]?.payload?.mois || hoverRevRef.current
                       if (code) setPinnedRevMois(prev => prev === code ? null : code)
                     }}
                     style={{ cursor: "pointer" }}
@@ -803,7 +857,8 @@ export default function DashboardPage() {
                 )}
               </div>
             </ChartCard>
-
+            </div>
+            <div style={{ order: 1, minWidth: 0 }}>
             <ChartCard
               title="Revenus par type de projet"
               expandable
@@ -847,6 +902,7 @@ export default function DashboardPage() {
                 </div>
               </div>
             </ChartCard>
+            </div>
           </div>
 
           {/* ── Row 3: Top fournisseurs/clients + Rentabilité ── */}
@@ -1592,7 +1648,7 @@ function ChartCard({ title, value, sub, right, children, renderExpanded, expanda
             boxShadow: "0 24px 80px rgba(0,0,0,0.6)",
           }} onClick={e => e.stopPropagation()}>
             {header}
-            <div className="chart-expanded" style={{ height: isWide ? "min(500px, calc(90vh - 140px))" : "calc(92vh - 130px)" }}>
+            <div className="chart-expanded" style={{ height: isWide ? "calc(90vh - 140px)" : "calc(92vh - 130px)" }}>
               {renderExpanded ? renderExpanded() : children}
             </div>
           </div>
