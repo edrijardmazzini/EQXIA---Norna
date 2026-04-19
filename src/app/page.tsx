@@ -68,8 +68,9 @@ export default function DashboardPage() {
   const [themeOpen, setThemeOpen] = useState(false)
   const [bgImage, setBgImage] = useState(BG_IMAGES[0])
   const [timeRange, setTimeRange] = useState<"all" | "12m" | "6m" | "3m">("all")
-  const [depPeriod, setDepPeriod] = useState<"all" | "year" | "quarter" | "month">("year")
-  const [revPeriod, setRevPeriod] = useState<"all" | "year" | "quarter" | "month">("year")
+  const [kpiPeriod, setKpiPeriod] = useState<"all" | "year" | "quarter" | "month">("year")
+  const depPeriod = kpiPeriod
+  const revPeriod = kpiPeriod
   const [revMode, setRevMode] = useState<"total" | "types">("total")
   const [topMode, setTopMode] = useState<"clients" | "fournisseurs">("clients")
   const [tableMode, setTableMode] = useState<"ventes" | "depenses">("ventes")
@@ -129,6 +130,7 @@ export default function DashboardPage() {
   }, [projects, revPeriod, currentDossier, currentYear, quarterStart])
 
   const depTotal = useMemo(() => depFiltered.reduce((s, d) => s + d.montantMUR, 0), [depFiltered])
+  const depTotalAll = useMemo(() => depenses.reduce((s, d) => s + d.montantMUR, 0), [depenses])
   const revTotalAll = useMemo(() => projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).reduce((s, p) => s + toMUR(p.finalAmount, p.currency), 0), [projects])
   const revTotal = useMemo(() => revFilteredProjects.reduce((s, p) => s + toMUR(p.finalAmount, p.currency), 0), [revFilteredProjects])
   const totalProfit = revTotal - depTotal
@@ -164,7 +166,8 @@ export default function DashboardPage() {
     return [...allKeys].sort().map(k => ({ mois: k, label: fmtDossier(k), revenus: revMap[k] || 0, depenses: depMap[k] || 0 }))
   }, [projects, depenses])
 
-  // Revenus par mois ventilés par type de projet (hors Internal pour cohérence avec "Par type de projet")
+  // Revenus par mois ventilés par type de projet (hors Internal pour cohérence)
+  // Couvre tous les mois de la série (revenus + dépenses) pour que l'axe soit continu
   const revParMoisParType = useMemo(() => {
     const byMois: Record<string, Record<string, number>> = {}
     const typesSet = new Set<string>()
@@ -178,17 +181,40 @@ export default function DashboardPage() {
       byMois[k][type] = (byMois[k][type] || 0) + toMUR(p.finalAmount, p.currency)
       typesSet.add(type)
     })
-    const keys = Object.keys(byMois).sort()
     const types = [...typesSet]
+
+    // Union de tous les mois présents (revenus + dépenses) pour avoir un axe continu
+    const allMonths = new Set<string>(Object.keys(byMois))
+    depenses.forEach(d => { if (d.dossier) allMonths.add(d.dossier) })
+    projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => {
+      if (!p.startDate) return
+      const d = new Date(p.startDate)
+      allMonths.add(`${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`)
+    })
+    // Construire la plage continue entre min et max pour inclure aussi les mois vides
+    const sorted = [...allMonths].filter(Boolean).sort()
+    const fillRange: string[] = []
+    if (sorted.length >= 2) {
+      const [y1, m1] = [parseInt(sorted[0].slice(0, 2), 10), parseInt(sorted[0].slice(2), 10)]
+      const [y2, m2] = [parseInt(sorted[sorted.length - 1].slice(0, 2), 10), parseInt(sorted[sorted.length - 1].slice(2), 10)]
+      let y = y1, m = m1
+      while (y < y2 || (y === y2 && m <= m2)) {
+        fillRange.push(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
+        m++; if (m > 12) { m = 1; y++ }
+      }
+    } else if (sorted.length === 1) {
+      fillRange.push(sorted[0])
+    }
+
     return {
       types,
-      data: keys.map(k => {
+      data: fillRange.map(k => {
         const row: Record<string, number | string> = { mois: k, label: fmtDossier(k) }
-        types.forEach(t => { row[t] = byMois[k][t] || 0 })
+        types.forEach(t => { row[t] = byMois[k]?.[t] || 0 })
         return row
       }),
     }
-  }, [projects])
+  }, [projects, depenses])
 
   const depListByDossier = useMemo(() => {
     const m: Record<string, Depense[]> = {}
@@ -235,7 +261,7 @@ export default function DashboardPage() {
     }).sort((a, b) => b.value - a.value)
   }, [depenses])
 
-  const topFourn = useMemo(() => allFourn.slice(0, 8), [allFourn])
+  const topFourn = useMemo(() => allFourn.slice(0, 25), [allFourn])
 
   const allClients = useMemo(() => {
     const m: Record<string, { value: number; count: number; projects: Project[] }> = {}
@@ -248,7 +274,7 @@ export default function DashboardPage() {
     return Object.entries(m).map(([name, v]) => ({ name, value: v.value, count: v.count, projects: v.projects })).sort((a, b) => b.value - a.value)
   }, [projects])
 
-  const topClients = useMemo(() => allClients.slice(0, 8), [allClients])
+  const topClients = useMemo(() => allClients.slice(0, 25), [allClients])
 
   const topData = topMode === "clients" ? topClients : topFourn
 
@@ -347,9 +373,9 @@ export default function DashboardPage() {
       <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.32)" }} />
       <div style={{ textAlign: "center", position: "relative", zIndex: 1 }}>
         <img src="/assets/logos/eqxia-logo-teal-transparent.png" alt="EQXIA" style={{ height: "var(--loading-logo-h)", marginBottom: 20 }} />
-        <div style={{ color: "var(--text-accent)", fontSize: "var(--loading-app-fs)", fontWeight: 800, letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 28 }}>Plutus</div>
+        <div style={{ color: "#A6C9CE", fontFamily: "'Inter', system-ui, sans-serif", fontSize: "var(--loading-app-fs)", fontWeight: 300, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 28 }}>Plutus</div>
         <div style={{ width: 36, height: 36, border: "3px solid var(--border-subtle)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
-        <div style={{ color: "var(--text-accent)", fontSize: "var(--fs-sm)", letterSpacing: "0.05em" }}>Chargement…</div>
+        <div style={{ color: "#A6C9CE", fontFamily: "'Inter', system-ui, sans-serif", fontSize: "var(--fs-sm)", fontWeight: 300, letterSpacing: "0.12em" }}>Chargement…</div>
       </div>
     </div>
   )
@@ -384,7 +410,7 @@ export default function DashboardPage() {
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{revPeriodLabel}</div>
-                <Seg value={revPeriod} onChange={v => setRevPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
+                <Seg value={kpiPeriod} onChange={v => setKpiPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
               </div>
             </div>
 
@@ -402,7 +428,7 @@ export default function DashboardPage() {
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{depPeriodLabel}</div>
-                <Seg value={depPeriod} onChange={v => setDepPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
+                <Seg value={kpiPeriod} onChange={v => setKpiPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
               </div>
             </div>
 
@@ -446,7 +472,7 @@ export default function DashboardPage() {
 
           {/* ── Row 1: Dépenses mensuelles + Par catégorie ── */}
           <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16 }}>
-            <ChartCard title="Dépenses mensuelles" value={`${Math.round(depTotal).toLocaleString("fr-FR")} MUR`} expandable>
+            <ChartCard title="Dépenses mensuelles" value={`${Math.round(depTotalAll).toLocaleString("fr-FR")} MUR`} expandable>
               <ResponsiveContainer width="100%" height={280}>
                 <AreaChart data={depParMois}>
                   <defs>
@@ -467,7 +493,7 @@ export default function DashboardPage() {
             </ChartCard>
 
             <ChartCard
-              title="Par catégorie"
+              title="Dépenses par catégorie"
               expandable
               expandMode="tall"
               renderExpanded={() => (
@@ -547,7 +573,7 @@ export default function DashboardPage() {
             </ChartCard>
 
             <ChartCard
-              title="Par type de projet"
+              title="Revenus par type de projet"
               expandable
               expandMode="tall"
               renderExpanded={() => (
@@ -916,6 +942,7 @@ function BigPie({ data, colors, total, totalLabel, formatter, double }: {
 }) {
   const getValue = (d: any) => d.value ?? d.amount ?? 0
   const sum = total ?? data.reduce((s, d) => s + getValue(d), 0)
+  const totalCount = double ? data.reduce((s, d: any) => s + (d.count || 0), 0) : 0
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 24, height: "100%", alignItems: "center" }}>
@@ -944,12 +971,32 @@ function BigPie({ data, colors, total, totalLabel, formatter, double }: {
         </ResponsiveContainer>
         {totalLabel && (
           <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", textAlign: "center", pointerEvents: "none" }}>
-            <div style={{ fontSize: 32, fontWeight: 800, color: "var(--text-primary)", lineHeight: 1 }}>{formatter(sum)}</div>
+            <div style={{ fontSize: 36, fontWeight: 800, color: "var(--text-primary)", lineHeight: 1 }}>
+              {double ? totalCount : formatter(sum)}
+            </div>
             <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>{totalLabel}</div>
           </div>
         )}
       </div>
       <div style={{ maxHeight: "100%", overflowY: "auto", paddingRight: 8 }}>
+        {/* Ligne "Total" en tête */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 4px", borderBottom: "2px solid rgba(166,201,206,0.25)", marginBottom: 4 }}>
+          <span style={{ width: 12, height: 12, borderRadius: 3, background: "var(--accent)", flexShrink: 0, opacity: 0.9 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: "var(--fs-sm)", color: "var(--text-primary)", fontWeight: 700 }}>
+              {double ? "Tous les projets" : "Total"}
+            </div>
+            {double && (
+              <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 2 }}>
+                {totalCount} projets
+              </div>
+            )}
+          </div>
+          <div style={{ textAlign: "right", flexShrink: 0 }}>
+            <div style={{ fontSize: "var(--fs-sm)", fontWeight: 800, fontFamily: "monospace", color: "var(--accent)" }}>{formatter(sum)}</div>
+            <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontFamily: "monospace" }}>100%</div>
+          </div>
+        </div>
         {data.map((d, i) => {
           const v = getValue(d)
           const pct = sum > 0 ? ((v / sum) * 100).toFixed(1) : "0"
