@@ -6,7 +6,7 @@ import { AppHeader } from "@/components/layout/AppHeader"
 import { useTheme } from "@/hooks/useTheme"
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, Legend,
+  PieChart, Pie, Cell, AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, Legend, Line,
 } from "recharts"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -529,10 +529,11 @@ export default function DashboardPage() {
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.06)" />
                   <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-                  <ReferenceLine y={0} stroke="rgba(166,201,206,0.15)" strokeDasharray="3 3" />
+                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.55)" strokeDasharray="4 4" strokeWidth={1.5} ifOverflow="extendDomain" label={{ value: "0", position: "insideLeft", fill: "var(--text-muted)", fontSize: 10 }} />
                   <Tooltip content={<HeroTooltip />} />
                   <Area type="monotone" dataKey="revenus" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev)" dot={false} activeDot={{ r: 4, fill: "#A6C9CE", strokeWidth: 0 }} />
                   <Area type="monotone" dataKey="depenses" stroke="#ef4444" strokeWidth={2} fill="url(#gDep)" dot={false} activeDot={{ r: 4, fill: "#ef4444", strokeWidth: 0 }} />
+                  <Line type="monotone" dataKey="net" stroke="#22c55e" strokeWidth={2} strokeDasharray="5 3" dot={false} activeDot={{ r: 4, fill: "#22c55e", strokeWidth: 0 }} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
