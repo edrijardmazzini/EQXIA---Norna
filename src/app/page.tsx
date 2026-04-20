@@ -145,6 +145,7 @@ export default function DashboardPage() {
   const depPeriod = kpiPeriod
   const revPeriod = kpiPeriod
   const [revMode, setRevMode] = useState<"total" | "types">("total")
+  const [chargesMode, setChargesMode] = useState<"all" | "depenses" | "salaires">("all")
   const [topMode, setTopMode] = useState<"clients" | "fournisseurs">("clients")
   const [tableMode, setTableMode] = useState<"ventes" | "depenses">("ventes")
 
@@ -339,39 +340,44 @@ export default function DashboardPage() {
     return m
   }, [depParCat])
 
-  const revParMois = useMemo(() => {
+  // Plage de mois commune pour les charts Revenus mensuels (Total + Par types) : min existant → current+3
+  const revChartRange = useMemo(() => {
     const revMap: Record<string, number> = {}
-    // Tous les projets (pas seulement Won) — pondérés par win rate
     projects.forEach(p => {
       const iso = getRevenueDateISO(p)
-      if (!iso) return; const d = new Date(iso); const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`; revMap[k] = (revMap[k] || 0) + getRevenueMUR(p)
+      if (!iso) return
+      const d = new Date(iso)
+      const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+      revMap[k] = (revMap[k] || 0) + getRevenueMUR(p)
     })
     const depMap: Record<string, number> = {}
     depenses.forEach(d => { if (d.dossier) depMap[d.dossier] = (depMap[d.dossier] || 0) + d.montantMUR })
-    // Axe continu : min existant → max(current + 3 mois)
     const allKeys = new Set([...Object.keys(revMap), ...Object.keys(depMap)])
     const curY = parseInt(currentDossier.slice(0, 2), 10)
     const curM = parseInt(currentDossier.slice(2), 10)
-    // Ajouter current + 3 mois futurs
     for (let i = 0; i <= 3; i++) {
       let y = curY, m = curM + i
       while (m > 12) { m -= 12; y += 1 }
       allKeys.add(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
     }
-    const sortedKeys = [...allKeys].sort()
-    // Remplir la plage continue entre min et max
+    const sorted = [...allKeys].sort()
     const filled: string[] = []
-    if (sortedKeys.length >= 2) {
-      const [y1, m1] = [parseInt(sortedKeys[0].slice(0, 2), 10), parseInt(sortedKeys[0].slice(2), 10)]
-      const [y2, m2] = [parseInt(sortedKeys[sortedKeys.length - 1].slice(0, 2), 10), parseInt(sortedKeys[sortedKeys.length - 1].slice(2), 10)]
+    if (sorted.length >= 2) {
+      const [y1, m1] = [parseInt(sorted[0].slice(0, 2), 10), parseInt(sorted[0].slice(2), 10)]
+      const [y2, m2] = [parseInt(sorted[sorted.length - 1].slice(0, 2), 10), parseInt(sorted[sorted.length - 1].slice(2), 10)]
       let y = y1, m = m1
       while (y < y2 || (y === y2 && m <= m2)) {
         filled.push(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
         m++; if (m > 12) { m = 1; y++ }
       }
-    } else if (sortedKeys.length === 1) {
-      filled.push(sortedKeys[0])
+    } else if (sorted.length === 1) {
+      filled.push(sorted[0])
     }
+    return { filled, revMap, depMap }
+  }, [projects, depenses, currentDossier])
+
+  const revParMois = useMemo(() => {
+    const { filled, revMap, depMap } = revChartRange
     return filled.map(k => {
       const isFuture = k > currentDossier
       const inPast = k <= currentDossier
@@ -388,7 +394,7 @@ export default function DashboardPage() {
         revenusFuture: inFuture ? rev : null,
       }
     })
-  }, [projects, depenses, currentDossier])
+  }, [revChartRange, currentDossier])
 
   // Revenus par mois ventilés par type de projet (hors Internal pour cohérence)
   // Couvre tous les mois de la série (revenus + dépenses) pour que l'axe soit continu
@@ -409,37 +415,23 @@ export default function DashboardPage() {
     })
     const types = [...typesSet]
 
-    // Union des mois (revenus + dépenses) + current +3 pour futur
-    const allMonths = new Set<string>(Object.keys(byMois))
-    depenses.forEach(d => { if (d.dossier) allMonths.add(d.dossier) })
-    const curY = parseInt(currentDossier.slice(0, 2), 10)
-    const curM = parseInt(currentDossier.slice(2), 10)
-    for (let i = 0; i <= 3; i++) {
-      let y = curY, m = curM + i
-      while (m > 12) { m -= 12; y += 1 }
-      allMonths.add(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
-    }
-    const sorted = [...allMonths].filter(Boolean).sort()
-    const fillRange: string[] = []
-    if (sorted.length >= 2) {
-      const [y1, m1] = [parseInt(sorted[0].slice(0, 2), 10), parseInt(sorted[0].slice(2), 10)]
-      const [y2, m2] = [parseInt(sorted[sorted.length - 1].slice(0, 2), 10), parseInt(sorted[sorted.length - 1].slice(2), 10)]
-      let y = y1, m = m1
-      while (y < y2 || (y === y2 && m <= m2)) {
-        fillRange.push(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
-        m++; if (m > 12) { m = 1; y++ }
-      }
-    } else if (sorted.length === 1) {
-      fillRange.push(sorted[0])
-    }
+    // Utilise exactement le même range que revParMois pour cohérence visuelle
+    const { filled } = revChartRange
 
     return {
       types,
-      data: fillRange.map(k => {
+      data: filled.map(k => {
         const isFuture = k > currentDossier
         const inPast = k <= currentDossier
         const inFuture = k >= currentDossier
-        const row: Record<string, number | string | boolean | null> = { mois: k, label: fmtDossier(k), isFuture }
+        // Agrégé pour tooltip : somme de tous les types du mois
+        const rowTotal = Object.values(byMois[k] || {}).reduce((s, v) => s + v, 0)
+        const row: Record<string, number | string | boolean | null> = {
+          mois: k,
+          label: fmtDossier(k),
+          isFuture,
+          revenus: rowTotal, // ← permet au tooltip de retrouver la valeur
+        }
         types.forEach(t => {
           const v = byMois[k]?.[t] || 0
           row[t] = v
@@ -449,7 +441,7 @@ export default function DashboardPage() {
         return row
       }),
     }
-  }, [projects, depenses, currentDossier])
+  }, [projects, revChartRange, currentDossier])
 
   const depListByDossier = useMemo(() => {
     const m: Record<string, Depense[]> = {}
@@ -1033,7 +1025,24 @@ export default function DashboardPage() {
             <ChartCard
               title="Charges mensuelles"
               sub="Salaires + Dépenses · survolez un mois · cliquez pour figer"
-              value={`${Math.round(depTotalAll + salaireMensuel * computeSalariedMonths("all")).toLocaleString("fr-FR")} MUR`}
+              right={<Seg value={chargesMode} onChange={v => setChargesMode(v as any)} options={[["all", "Total"], ["depenses", "Dépenses"], ["salaires", "Salaires"]]} />}
+              value={
+                <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
+                  <span>{`${Math.round(depTotalAll + salaireMensuel * computeSalariedMonths("all")).toLocaleString("fr-FR")} MUR`}</span>
+                  <span style={{ display: "inline-flex", gap: 10, fontSize: "var(--fs-2xs)", fontWeight: 500, fontFamily: "inherit" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "#ef4444" }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
+                      <span style={{ fontFamily: "monospace" }}>{Math.round(depTotalAll).toLocaleString("fr-FR")}</span>
+                      <span style={{ color: "var(--text-muted)" }}>dép</span>
+                    </span>
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "#f97316" }}>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#f97316", display: "inline-block" }} />
+                      <span style={{ fontFamily: "monospace" }}>{Math.round(salaireMensuel * computeSalariedMonths("all")).toLocaleString("fr-FR")}</span>
+                      <span style={{ color: "var(--text-muted)" }}>sal</span>
+                    </span>
+                  </span>
+                </span> as any
+              }
               expandable
               renderExpanded={() => {
                 const filterMois = pinnedDepMois || depFsFilterMois
@@ -1079,9 +1088,11 @@ export default function DashboardPage() {
                           <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
                           <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                           <Tooltip content={<CTooltip formatter={fmt} />} />
-                          {/* Salaires en base */}
-                          <Area type="monotone" dataKey="Salaires" stackId="1" stroke="#f97316" strokeWidth={0.5} fill="url(#gSalFs)" />
-                          {allCats.map((cat, i) => (
+                          {/* Salaires en base (hors mode depenses) */}
+                          {chargesMode !== "depenses" && (
+                            <Area type="monotone" dataKey="Salaires" stackId="1" stroke="#f97316" strokeWidth={0.5} fill="url(#gSalFs)" />
+                          )}
+                          {chargesMode !== "salaires" && allCats.map((cat, i) => (
                             <Area key={cat} type="monotone" dataKey={cat} stackId="1" stroke={PIE_CAT[i % PIE_CAT.length]} strokeWidth={0.5} fill={`url(#gCatFs${i})`} />
                           ))}
                           {currentDepMois && <ReferenceLine x={fmtDossier(currentDepMois)} stroke={pinnedDepMois ? "var(--accent)" : "rgba(166,201,206,0.4)"} strokeWidth={pinnedDepMois ? 2 : 1} strokeDasharray={pinnedDepMois ? "0" : "3 3"} />}
@@ -1211,9 +1222,12 @@ export default function DashboardPage() {
                     <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                     <Tooltip content={<CTooltip formatter={fmt} />} />
-                    {/* Salaires en base */}
-                    <Area type="monotone" dataKey="Salaires" stackId="1" stroke="#f97316" strokeWidth={0.5} fill="url(#gSal2)" />
-                    {allCats.map((cat, i) => (
+                    {/* Salaires en base (hors mode depenses) */}
+                    {chargesMode !== "depenses" && (
+                      <Area type="monotone" dataKey="Salaires" stackId="1" stroke="#f97316" strokeWidth={0.5} fill="url(#gSal2)" />
+                    )}
+                    {/* Catégories de dépenses (hors mode salaires) */}
+                    {chargesMode !== "salaires" && allCats.map((cat, i) => (
                       <Area key={cat} type="monotone" dataKey={cat} stackId="1" stroke={PIE_CAT[i % PIE_CAT.length]} strokeWidth={0.5} fill={`url(#gCat${i})`} />
                     ))}
                     {pinnedDepMois && <ReferenceLine x={fmtDossier(pinnedDepMois)} stroke="var(--accent)" strokeWidth={2} />}
@@ -2437,7 +2451,7 @@ function KpiCard({ icon, iconBg, iconBorder, label, value, unit, sub, valueColor
   )
 }
 
-function ChartCard({ title, value, sub, right, children, renderExpanded, expandable, expandMode = "wide" }: { title: string; value?: string; sub?: string; right?: React.ReactNode; children: React.ReactNode; renderExpanded?: () => React.ReactNode; expandable?: boolean; expandMode?: "wide" | "tall" }) {
+function ChartCard({ title, value, sub, right, children, renderExpanded, expandable, expandMode = "wide" }: { title: string; value?: React.ReactNode; sub?: string; right?: React.ReactNode; children: React.ReactNode; renderExpanded?: () => React.ReactNode; expandable?: boolean; expandMode?: "wide" | "tall" }) {
   const [expanded, setExpanded] = useState(false)
 
   useEffect(() => {
