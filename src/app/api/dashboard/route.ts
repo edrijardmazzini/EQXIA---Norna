@@ -121,22 +121,25 @@ export async function GET() {
     // Parse projects
     const projects = projectsRaw.map((p: any) => {
       const props = p.properties
-      // Commission : % et bénéficiaire (relation → employees, ou texte/select)
+      // Commission : % (champ "% of commissions") et bénéficiaire (champ "Ad-hoc commissions 1 ? (eg training services)")
       let commissionPercent = 0
-      const comPctProp = props["Commission %"] || props["Commission"] || props["% Commission"]
+      const comPctProp = props["% of commissions"] || props["Commission %"] || props["Commission"]
       if (comPctProp) {
         if (comPctProp.type === "number") commissionPercent = comPctProp.number ?? 0
         else if (comPctProp.type === "formula") commissionPercent = getFormula(comPctProp) ?? 0
+        else if (comPctProp.type === "percent" || comPctProp.type === "rollup") commissionPercent = comPctProp.percent ?? getFormula(comPctProp) ?? 0
       }
       let commissionTo = ""
-      const comToProp = props["Commissionnaire"] || props["Commission à"] || props["Commission to"] || props["Bénéficiaire commission"]
+      const comToProp = props["Ad-hoc commissions 1 ? (eg training services)"] || props["Ad-hoc commissions 1"] || props["Commissionnaire"] || props["Commission à"]
       if (comToProp) {
         if (comToProp.type === "relation") {
           const ids = getRelationIds(comToProp)
-          commissionTo = ids.map(id => employeesMap[id] || clientsMap[id] || "Inconnu").join(", ")
+          commissionTo = ids.map(id => employeesMap[id] || clientsMap[id] || "Inconnu").filter(Boolean).join(", ")
         } else if (comToProp.type === "select") commissionTo = getSelect(comToProp)
+        else if (comToProp.type === "multi_select") commissionTo = (comToProp.multi_select || []).map((s: any) => s.name).join(", ")
         else if (comToProp.type === "people") commissionTo = (comToProp.people || []).map((u: any) => u.name).join(", ")
         else if (comToProp.type === "rich_text" || comToProp.type === "title") commissionTo = getText(comToProp)
+        else if (comToProp.type === "status") commissionTo = comToProp.status?.name || ""
       }
       return {
         id: p.id,

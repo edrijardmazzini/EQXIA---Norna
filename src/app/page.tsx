@@ -118,6 +118,12 @@ export default function DashboardPage() {
   const [themeOpen, setThemeOpen] = useState(false)
   const [bgImage, setBgImage] = useState(BG_IMAGES[0])
   const [timeRange, setTimeRange] = useState<"all" | "12m" | "6m" | "3m">("all")
+  // Hero chart mode : Past (historique), Future (projection), Custom (plage libre)
+  const [heroMode, setHeroMode] = useState<"past" | "future" | "custom">("past")
+  const [heroPast, setHeroPast] = useState<"all" | "12m" | "6m" | "3m">("all")
+  const [heroFuture, setHeroFuture] = useState<"12m" | "6m" | "3m">("12m")
+  const [heroCustomStart, setHeroCustomStart] = useState<string>("") // format YYYY-MM
+  const [heroCustomEnd, setHeroCustomEnd] = useState<string>("")
   const [kpiPeriod, setKpiPeriod] = useState<"all" | "year" | "quarter" | "month">("year")
   const depPeriod = kpiPeriod
   const revPeriod = kpiPeriod
@@ -219,13 +225,54 @@ export default function DashboardPage() {
   const avgMargin = revTotal > 0 ? ((totalProfit / revTotal) * 100) : 0
   const projetsActifs = useMemo(() => projects.filter(p => p.status === "Active").length, [projects])
   const projetsTotal = useMemo(() => projects.filter(p => !["Lost", "Cancelled"].includes(p.status)).length, [projects])
+  // Label court "A. fiscale 2025-26"
+  const shortFyLabel = `A. fiscale ${fy.label.slice(0, 4)}-${fy.label.slice(-2)}`
   const periodLabel = (p: "all" | "year" | "quarter" | "month") =>
     p === "all" ? "Depuis toujours"
-    : p === "year" ? `Année fiscale ${fy.label}`
+    : p === "year" ? shortFyLabel
     : p === "quarter" ? fq.label
     : fmtDossier(currentDossier)
   const depPeriodLabel = periodLabel(depPeriod)
   const revPeriodLabel = periodLabel(revPeriod)
+
+  // Salaires : début = mars 2026 ("2603")
+  const SALAIRE_START_CODE = "2603"
+  const salaireMensuel = useMemo(() => employees.reduce((s, e) => s + (e.cje || 0) * 220 / 12, 0), [employees])
+
+  // Nombre de mois "salariés" (>= 2603 et <= currentDossier) inclus dans une période
+  const computeSalariedMonths = useCallback((period: "all" | "year" | "quarter" | "month"): number => {
+    const curCode = currentDossier
+    if (period === "month") return curCode >= SALAIRE_START_CODE ? 1 : 0
+    // Construire la liste des codes YYMM couverts
+    const codes: string[] = []
+    const pushRange = (fromY: number, fromM: number, toY: number, toM: number) => {
+      let y = fromY, m = fromM
+      while (y < toY || (y === toY && m <= toM)) {
+        codes.push(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
+        m++; if (m > 12) { m = 1; y++ }
+      }
+    }
+    if (period === "all") {
+      // Du 2603 à current
+      pushRange(26, 3, parseInt(curCode.slice(0, 2), 10), parseInt(curCode.slice(2), 10))
+    } else if (period === "year") {
+      // FY : juillet fyStartYear → juin fyStartYear+1, limité à current
+      const fyStartYY = fyStartYear % 100
+      pushRange(fyStartYY, 7, fyStartYY + 1, 6)
+    } else if (period === "quarter") {
+      const fromY = parseInt(fq.startCode.slice(0, 2), 10)
+      const fromM = parseInt(fq.startCode.slice(2), 10)
+      const toY = parseInt(fq.endCode.slice(0, 2), 10)
+      const toM = parseInt(fq.endCode.slice(2), 10)
+      pushRange(fromY, fromM, toY, toM)
+    }
+    return codes.filter(c => c >= SALAIRE_START_CODE && c <= curCode).length
+  }, [currentDossier, fyStartYear, fq])
+
+  const salairesForDepPeriod = useMemo(() => salaireMensuel * computeSalariedMonths(depPeriod), [salaireMensuel, computeSalariedMonths, depPeriod])
+  const salairesForRevPeriod = useMemo(() => salaireMensuel * computeSalariedMonths(revPeriod), [salaireMensuel, computeSalariedMonths, revPeriod])
+  const chargesTotal = depTotal + salairesForDepPeriod
+  const avgMarginWithSalaries = revTotal > 0 ? ((revTotal - chargesTotal) / revTotal) * 100 : 0
 
   // Charts data
   const depParMois = useMemo(() => {
@@ -414,33 +461,87 @@ export default function DashboardPage() {
 
   // Hero
   const heroData = useMemo(() => {
-    const allM = new Set<string>()
-    const dM: Record<string, number> = {}; depenses.forEach(d => { if (!d.dossier) return; dM[d.dossier] = (dM[d.dossier] || 0) + d.montantMUR; allM.add(d.dossier) })
-    const rM: Record<string, number> = {}; projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => { if (!p.startDate) return; const d = new Date(p.startDate); const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`; rM[k] = (rM[k] || 0) + getRevenueMUR(p); allM.add(k) })
-
-    // Salaire mensuel total = somme des (CJE × 220 / 12) pour tous les employés actifs
-    const salaireMensuel = employees.reduce((s, e) => s + (e.cje || 0) * 220 / 12, 0)
-    // Commence en mars 2026, et étendre jusqu'à 12 mois après aujourd'hui dans le futur
-    const SALAIRE_START_CODE = "2603"
-    const nowD = new Date()
-    for (let i = 0; i <= 12; i++) {
-      const d = new Date(nowD.getFullYear(), nowD.getMonth() + i, 1)
+    const dM: Record<string, number> = {}
+    depenses.forEach(d => { if (d.dossier) dM[d.dossier] = (dM[d.dossier] || 0) + d.montantMUR })
+    const rM: Record<string, number> = {}
+    projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => {
+      if (!p.startDate) return
+      const d = new Date(p.startDate)
       const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
-      allM.add(k)
+      rM[k] = (rM[k] || 0) + getRevenueMUR(p)
+    })
+
+    const curCode = currentDossier // ex "2604"
+    const curY = parseInt(curCode.slice(0, 2), 10)
+    const curM = parseInt(curCode.slice(2), 10)
+
+    // Construire la liste de codes YYMM selon heroMode
+    const codes: string[] = []
+    const addRange = (fromY: number, fromM: number, toY: number, toM: number) => {
+      let y = fromY, m = fromM
+      while (y < toY || (y === toY && m <= toM)) {
+        codes.push(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
+        m++; if (m > 12) { m = 1; y++ }
+      }
     }
-    let s = [...allM].sort(); if (timeRange !== "all") { const n = timeRange === "12m" ? 12 : timeRange === "6m" ? 6 : 3; s = s.slice(-n) }
-    return s.map(m => ({
-      mois: m,
-      label: fmtDossier(m),
-      depenses: dM[m] || 0,
-      revenus: rM[m] || 0,
-      net: (rM[m] || 0) - (dM[m] || 0),
-      salaires: m >= SALAIRE_START_CODE ? salaireMensuel : 0,
-    }))
-  }, [depenses, projects, employees, timeRange])
-  const heroTotalDep = useMemo(() => heroData.reduce((s, d) => s + d.depenses, 0), [heroData])
-  const heroTotalRev = useMemo(() => heroData.reduce((s, d) => s + d.revenus, 0), [heroData])
-  const heroNet = heroTotalRev - heroTotalDep
+
+    if (heroMode === "past") {
+      // Historique : tous les mois existants (rev ou dep), puis slice selon heroPast
+      const allPast = new Set<string>([...Object.keys(dM), ...Object.keys(rM)])
+      let sorted = [...allPast].sort()
+      // S'assurer qu'on ne dépasse pas current
+      sorted = sorted.filter(c => c <= curCode)
+      if (heroPast !== "all") {
+        const n = heroPast === "12m" ? 12 : heroPast === "6m" ? 6 : 3
+        sorted = sorted.slice(-n)
+      }
+      codes.push(...sorted)
+    } else if (heroMode === "future") {
+      // Du mois courant à +N mois
+      const n = heroFuture === "12m" ? 12 : heroFuture === "6m" ? 6 : 3
+      // start = mois courant, end = current + n
+      let toY = curY, toM = curM + n
+      while (toM > 12) { toM -= 12; toY += 1 }
+      addRange(curY, curM, toY, toM)
+    } else {
+      // custom : heroCustomStart/end format YYYY-MM ; fallback = FY complète
+      const parse = (s: string): [number, number] | null => {
+        if (!s || s.length < 7) return null
+        const [y, m] = s.split("-")
+        return [parseInt(y, 10) % 100, parseInt(m, 10)]
+      }
+      const s = parse(heroCustomStart)
+      const e = parse(heroCustomEnd)
+      if (s && e) {
+        addRange(s[0], s[1], e[0], e[1])
+      } else {
+        // FY par défaut : juillet fyStartYear → juin fyStartYear+1
+        const fyY = fyStartYear % 100
+        addRange(fyY, 7, fyY + 1, 6)
+      }
+    }
+
+    return codes.map(m => {
+      const isFuture = m > curCode
+      const rev = rM[m] || 0
+      const dep = dM[m] || 0
+      const sal = m >= SALAIRE_START_CODE ? salaireMensuel : 0
+      return {
+        mois: m,
+        label: fmtDossier(m),
+        isFuture,
+        depenses: isFuture ? 0 : dep,
+        revenus: isFuture ? 0 : rev,
+        salaires: sal,
+        // Net (charges = dép + sal) seulement sur le passé ; future = null pour créer un vide
+        net: isFuture ? null : (rev - dep - sal),
+      }
+    })
+  }, [depenses, projects, heroMode, heroPast, heroFuture, heroCustomStart, heroCustomEnd, currentDossier, fyStartYear, salaireMensuel])
+  const heroTotalDep = useMemo(() => heroData.filter(d => !d.isFuture).reduce((s, d) => s + (d.depenses || 0), 0), [heroData])
+  const heroTotalRev = useMemo(() => heroData.filter(d => !d.isFuture).reduce((s, d) => s + (d.revenus || 0), 0), [heroData])
+  const heroTotalSal = useMemo(() => heroData.filter(d => !d.isFuture).reduce((s, d) => s + (d.salaires || 0), 0), [heroData])
+  const heroNet = heroTotalRev - heroTotalDep - heroTotalSal
 
   // Table data — all items (no limit), with filters
   const allVentes = useMemo(() =>
@@ -449,6 +550,8 @@ export default function DashboardPage() {
   , [projects])
 
   // ── Cash / Commissions ────────────────────────────────────────
+  // Règle : si "Ad-hoc commissions 1 ? (eg training services)" est rempli,
+  // commission = "% of commissions" × "Final Amount" (dans la devise du projet, converti en MUR)
   const cashData = useMemo(() => {
     const wonProjects = projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status))
     let caTotal = 0
@@ -457,27 +560,36 @@ export default function DashboardPage() {
     const byBeneficiaire: Record<string, { total: number; percent: number; projectCount: number; projects: { name: string; amount: number; pct: number }[] }> = {}
 
     for (const p of wonProjects) {
-      const revenue = getRevenueMUR(p)
-      if (!revenue) continue
-      caTotal += revenue
-      const pct = Number(p.commissionPercent || 0)
+      const caMUR = getRevenueMUR(p)
+      if (!caMUR) continue
+      caTotal += caMUR
+
       const beneficiaire = (p.commissionTo || "").trim()
-      if (pct > 0 && beneficiaire) {
-        // pct peut être 0-1 (formule) ou 0-100 (number). On normalise : si > 1 → /100
-        const normalizedPct = pct > 1 ? pct / 100 : pct
-        const commission = revenue * normalizedPct
-        commissionsTotal += commission
-        eqxiaTotal += revenue - commission
-        if (!byBeneficiaire[beneficiaire]) byBeneficiaire[beneficiaire] = { total: 0, percent: normalizedPct * 100, projectCount: 0, projects: [] }
-        byBeneficiaire[beneficiaire].total += commission
+      const pct = Number(p.commissionPercent || 0)
+      // Normalise : si > 1 → /100 (pourcentage stocké en number 0-100)
+      const normalizedPct = pct > 1 ? pct / 100 : pct
+
+      if (beneficiaire && normalizedPct > 0 && p.finalAmount > 0) {
+        // Commission strictement = "% of commissions" * "Final Amount" (en devise du projet, converti MUR)
+        const commissionMUR = toMUR(p.finalAmount * normalizedPct, p.currency)
+        commissionsTotal += commissionMUR
+        eqxiaTotal += caMUR - commissionMUR
+        const percentLabel = normalizedPct * 100
+        if (!byBeneficiaire[beneficiaire]) byBeneficiaire[beneficiaire] = { total: 0, percent: percentLabel, projectCount: 0, projects: [] }
+        byBeneficiaire[beneficiaire].total += commissionMUR
         byBeneficiaire[beneficiaire].projectCount += 1
-        byBeneficiaire[beneficiaire].projects.push({ name: p.name, amount: commission, pct: normalizedPct * 100 })
+        byBeneficiaire[beneficiaire].projects.push({ name: p.name, amount: commissionMUR, pct: percentLabel })
       } else {
-        eqxiaTotal += revenue
+        eqxiaTotal += caMUR
       }
     }
     const beneficiaires = Object.entries(byBeneficiaire)
-      .map(([name, v]) => ({ name, ...v }))
+      .map(([name, v]) => ({
+        name,
+        ...v,
+        // % affiché = moyenne pondérée par le montant
+        percent: v.projects.length > 0 ? (v.projects.reduce((s, pr) => s + pr.pct * pr.amount, 0) / (v.total || 1)) : v.percent,
+      }))
       .sort((a, b) => b.total - a.total)
     return { caTotal, eqxiaTotal, commissionsTotal, beneficiaires }
   }, [projects])
@@ -630,16 +742,28 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <KpiCard icon="📉" iconBg="rgba(166,201,206,0.15)" iconBorder="rgba(166,201,206,0.3)" label="Average Margin" value={`${avgMargin.toFixed(1)}%`} unit="" sub={`Rev ${revPeriodLabel} · Dép ${depPeriodLabel}`} valueColor={avgMargin >= 0 ? "var(--accent)" : "var(--color-error)"} />
+            <KpiCard
+              icon="📉"
+              iconBg="rgba(166,201,206,0.15)"
+              iconBorder="rgba(166,201,206,0.3)"
+              label="Average Margin"
+              value={`${avgMarginWithSalaries.toFixed(1)}%`}
+              unit=""
+              sub={`Rev ${revPeriodLabel} − Charges (dép & sal) ${depPeriodLabel}`}
+              valueColor={avgMarginWithSalaries >= 0 ? "var(--accent)" : "var(--color-error)"}
+            />
 
-            {/* Dépenses card with toggle */}
+            {/* Charges (Dépenses + Salaires) card with toggle */}
             <div style={card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>Dépenses</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>Charges (Dépenses &amp; Salaires)</div>
                 <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>💸</div>
               </div>
+              <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontFamily: "monospace", marginBottom: 3 }}>
+                {Math.round(salairesForDepPeriod).toLocaleString("fr-FR")} <span style={{ color: "#f97316" }}>sal</span> + {Math.round(depTotal).toLocaleString("fr-FR")} <span style={{ color: "#ef4444" }}>dép</span> =
+              </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                <span style={{ fontSize: 28, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em", lineHeight: 1 }}>{Math.round(depTotal).toLocaleString("fr-FR")}</span>
+                <span style={{ fontSize: 28, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em", lineHeight: 1 }}>{Math.round(chargesTotal).toLocaleString("fr-FR")}</span>
                 <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>MUR</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
@@ -656,23 +780,55 @@ export default function DashboardPage() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)", flexWrap: "wrap", gap: 12 }}>
               <div>
                 <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>Dépenses vs Revenus</div>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>Vue mensuelle — net = revenus - dépenses</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>
+                  Dépenses empilées sur salaires · Net = Revenus - Dépenses - Salaires
+                </div>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                <div style={{ display: "flex", gap: 12, fontSize: "var(--fs-xs)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 10, fontSize: "var(--fs-xs)", flexWrap: "wrap" }}>
                   <Badge c="#A6C9CE" l="Revenus" v={Math.round(heroTotalRev).toLocaleString("fr-FR")} />
                   <Badge c="#ef4444" l="Dépenses" v={Math.round(heroTotalDep).toLocaleString("fr-FR")} />
+                  <Badge c="#f97316" l="Salaires" v={Math.round(salaireMensuel).toLocaleString("fr-FR")} />
                   <Badge c={heroNet >= 0 ? "#22c55e" : "#ef4444"} l="Net" v={`${heroNet >= 0 ? "+" : ""}${Math.round(heroNet).toLocaleString("fr-FR")}`} />
-                  <Badge c="#f97316" l="Salaires" v={Math.round(employees.reduce((s, e) => s + (e.cje || 0) * 220 / 12, 0)).toLocaleString("fr-FR")} />
                 </div>
-                <Seg value={timeRange} onChange={v => setTimeRange(v as any)} options={[["all", "Tout"], ["12m", "12m"], ["6m", "6m"], ["3m", "3m"]]} />
               </div>
             </div>
+
+            {/* Ligne contrôles : Mode + sélecteur secondaire */}
+            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 24px", borderBottom: "1px solid rgba(166,201,206,0.06)", flexWrap: "wrap" }}>
+              <Seg value={heroMode} onChange={v => setHeroMode(v as any)} options={[["past", "Past"], ["future", "Future"], ["custom", "Custom"]]} />
+              {heroMode === "past" && (
+                <Seg value={heroPast} onChange={v => setHeroPast(v as any)} options={[["all", "All"], ["12m", "12m"], ["6m", "6m"], ["3m", "3m"]]} />
+              )}
+              {heroMode === "future" && (
+                <Seg value={heroFuture} onChange={v => setHeroFuture(v as any)} options={[["12m", "12m"], ["6m", "6m"], ["3m", "3m"]]} />
+              )}
+              {heroMode === "custom" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-2xs)" }}>
+                  <label style={{ color: "var(--text-muted)" }}>Du</label>
+                  <input type="month" value={heroCustomStart} onChange={e => setHeroCustomStart(e.target.value)} placeholder={`${fy.start.getFullYear()}-07`} style={{ padding: "3px 6px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit" }} />
+                  <label style={{ color: "var(--text-muted)" }}>au</label>
+                  <input type="month" value={heroCustomEnd} onChange={e => setHeroCustomEnd(e.target.value)} placeholder={`${fy.end.getFullYear()}-06`} style={{ padding: "3px 6px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit" }} />
+                  {(heroCustomStart || heroCustomEnd) && (
+                    <button onClick={() => { setHeroCustomStart(""); setHeroCustomEnd("") }} style={{ background: "none", border: "1px solid var(--border-subtle)", color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "3px 6px", borderRadius: 4, fontFamily: "inherit" }}>
+                      FY défaut
+                    </button>
+                  )}
+                </div>
+              )}
+              {heroMode === "future" && (
+                <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontStyle: "italic" }}>
+                  Projection (pointillés) — les salaires sont supposés constants
+                </span>
+              )}
+            </div>
+
             <div style={{ padding: "16px 16px 8px" }}>
               <ResponsiveContainer width="100%" height={340}>
                 <AreaChart data={heroData} margin={{ left: 10, right: 10 }}>
                   <defs>
-                    <linearGradient id="gDep" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ef4444" stopOpacity={0.25} /><stop offset="95%" stopColor="#ef4444" stopOpacity={0.02} /></linearGradient>
+                    <linearGradient id="gDep" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ef4444" stopOpacity={0.30} /><stop offset="95%" stopColor="#ef4444" stopOpacity={0.02} /></linearGradient>
+                    <linearGradient id="gSal" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f97316" stopOpacity={0.35} /><stop offset="95%" stopColor="#f97316" stopOpacity={0.02} /></linearGradient>
                     <linearGradient id="gRev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#A6C9CE" stopOpacity={0.35} /><stop offset="95%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.06)" />
@@ -680,10 +836,11 @@ export default function DashboardPage() {
                   <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                   <ReferenceLine y={0} stroke="rgba(255,255,255,0.55)" strokeDasharray="4 4" strokeWidth={1.5} ifOverflow="extendDomain" label={{ value: "0", position: "insideLeft", fill: "var(--text-muted)", fontSize: 10 }} />
                   <Tooltip content={<HeroTooltip />} />
-                  <Area type="monotone" dataKey="revenus" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev)" dot={false} activeDot={{ r: 4, fill: "#A6C9CE", strokeWidth: 0 }} />
-                  <Area type="monotone" dataKey="depenses" stroke="#ef4444" strokeWidth={2} fill="url(#gDep)" dot={false} activeDot={{ r: 4, fill: "#ef4444", strokeWidth: 0 }} />
-                  <Line type="monotone" dataKey="net" stroke="#22c55e" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#22c55e", strokeWidth: 0 }} />
-                  <Line type="monotone" dataKey="salaires" stroke="#f97316" strokeWidth={2} strokeDasharray="4 3" dot={false} activeDot={{ r: 4, fill: "#f97316", strokeWidth: 0 }} />
+                  {/* Charges empilées : salaires en base, dépenses par-dessus */}
+                  <Area type="monotone" dataKey="salaires" stackId="charges" stroke="#f97316" strokeWidth={2} fill="url(#gSal)" strokeDasharray={heroMode === "future" ? "5 4" : undefined} dot={false} activeDot={{ r: 4, fill: "#f97316", strokeWidth: 0 }} />
+                  <Area type="monotone" dataKey="depenses" stackId="charges" stroke="#ef4444" strokeWidth={2} fill="url(#gDep)" strokeDasharray={heroMode === "future" ? "5 4" : undefined} dot={false} activeDot={{ r: 4, fill: "#ef4444", strokeWidth: 0 }} />
+                  <Area type="monotone" dataKey="revenus" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev)" strokeDasharray={heroMode === "future" ? "5 4" : undefined} dot={false} activeDot={{ r: 4, fill: "#A6C9CE", strokeWidth: 0 }} />
+                  <Line type="monotone" dataKey="net" stroke="#22c55e" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#22c55e", strokeWidth: 0 }} connectNulls={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
