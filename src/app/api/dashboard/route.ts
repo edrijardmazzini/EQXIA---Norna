@@ -88,14 +88,18 @@ export async function GET() {
 
     console.log(`[dashboard] Fetched: ${projectsRaw.length} projects, ${depensesRaw.length} dépenses, ${employeesRaw.length} employees, ${clientsRaw.length} clients`)
 
-    // Build clients lookup
+    // Build clients lookup + structured list
     const clientsMap: Record<string, string> = {}
+    const clients: Array<{ id: string; name: string }> = []
     for (const c of clientsRaw) {
-      const titleProp = Object.values(c.properties as Record<string, any>).find((p: any) => p.type === "title")
-      if (titleProp?.title?.length > 0) {
-        clientsMap[c.id] = titleProp.title.map((t: any) => t.plain_text).join("").trim()
+      const titleProp = Object.values(c.properties as Record<string, any>).find((p: any) => p.type === "title") as any
+      const name = titleProp?.title?.length > 0 ? titleProp.title.map((t: any) => t.plain_text).join("").trim() : ""
+      if (name) {
+        clientsMap[c.id] = name
+        clients.push({ id: c.id, name })
       }
     }
+    clients.sort((a, b) => a.name.localeCompare(b.name))
 
     // Build employees lookup + structured list (CJE, dates)
     const employeesMap: Record<string, string> = {}
@@ -190,7 +194,7 @@ export async function GET() {
       }
     })
 
-    return NextResponse.json({ projects, depenses, employees })
+    return NextResponse.json({ projects, depenses, employees, clients })
   } catch (error: any) {
     console.error("Dashboard fetch error:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })

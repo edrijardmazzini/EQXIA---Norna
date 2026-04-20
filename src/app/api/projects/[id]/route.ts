@@ -14,7 +14,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const { id } = await params
     const body = await req.json()
-    const { name, status, type, methodology, currency, quotedAmount, finalAmount, startDate, endDate, clientSatisfaction, riskLevel, winPercent } = body
+    const { name, status, type, methodology, currency, quotedAmount, finalAmount, startDate, endDate, clientSatisfaction, riskLevel, winPercent, clientIds, commissionPercent, commissionTo } = body
 
     const properties: Record<string, unknown> = {}
 
@@ -30,6 +30,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (clientSatisfaction) properties["Client Satisfaction"] = { select: { name: clientSatisfaction } }
     if (startDate) properties["Start Date"] = { date: { start: startDate } }
     if (endDate) properties["End Date"] = { date: { start: endDate } }
+    // Relation Client (accepte id unique string ou array)
+    if (clientIds !== undefined) {
+      const ids: string[] = Array.isArray(clientIds) ? clientIds : (clientIds ? [clientIds] : [])
+      properties["Client"] = { relation: ids.map(id => ({ id })) }
+    }
+    if (commissionPercent != null && commissionPercent !== "") {
+      properties["% of commissions"] = { number: Number(commissionPercent) || 0 }
+    }
+    if (commissionTo !== undefined && commissionTo !== "") {
+      properties["Ad-hoc commissions 1 ? (eg training services)"] = { rich_text: [{ text: { content: String(commissionTo) } }] }
+    }
 
     const res = await fetch(`https://api.notion.com/v1/pages/${id}`, {
       method: "PATCH",

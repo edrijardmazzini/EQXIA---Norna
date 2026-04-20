@@ -17,8 +17,11 @@ interface Project {
   winPercent: number; riskLevel: string; startDate: string; endDate: string
   rentabilite: number | null; netAmount: number | null; humanCost: number | null
   clientName: string; clientSatisfaction?: string
+  clientIds?: string[]
   commissionPercent?: number; commissionTo?: string
 }
+
+interface Client { id: string; name: string }
 
 interface Employee {
   id: string; name: string; cje: number; startDate: string; endDate: string; role: string
@@ -126,6 +129,7 @@ export default function DashboardPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [depenses, setDepenses] = useState<Depense[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [themeOpen, setThemeOpen] = useState(false)
@@ -190,7 +194,7 @@ export default function DashboardPage() {
   const fetchData = useCallback(() => {
     fetch("/api/dashboard").then(r => r.json()).then(data => {
       if (data.error) throw new Error(data.error)
-      setProjects(data.projects || []); setDepenses(data.depenses || []); setEmployees(data.employees || [])
+      setProjects(data.projects || []); setDepenses(data.depenses || []); setEmployees(data.employees || []); setClients(data.clients || [])
     }).catch(e => setError(e.message)).finally(() => setLoading(false))
   }, [])
 
@@ -302,12 +306,17 @@ export default function DashboardPage() {
   const chargesTotal = depTotal + salairesForDepPeriod
   const avgMarginWithSalaries = revTotal > 0 ? ((revTotal - chargesTotal) / revTotal) * 100 : 0
 
-  // Charts data
+  // Charts data — inclut salaires (colonne "Salaires") pour stacker comme la chart principale
   const depParMois = useMemo(() => {
     const m: Record<string, Record<string, number>> = {}
     depenses.forEach(d => { if (!d.dossier) return; if (!m[d.dossier]) m[d.dossier] = {}; m[d.dossier][d.categorie] = (m[d.dossier][d.categorie] || 0) + d.montantMUR })
-    return Object.entries(m).sort(([a], [b]) => a.localeCompare(b)).map(([dossier, cats]) => ({ dossier, label: fmtDossier(dossier), ...cats }))
-  }, [depenses])
+    return Object.entries(m).sort(([a], [b]) => a.localeCompare(b)).map(([dossier, cats]) => ({
+      dossier,
+      label: fmtDossier(dossier),
+      Salaires: dossier >= SALAIRE_START_CODE ? salaireMensuel : 0,
+      ...cats,
+    }))
+  }, [depenses, salaireMensuel])
   // Ordonné selon l'importance (même ordre que le pie "Dépenses par catégorie")
   const allCats = useMemo(() => {
     const m: Record<string, number> = {}
@@ -332,22 +341,62 @@ export default function DashboardPage() {
 
   const revParMois = useMemo(() => {
     const revMap: Record<string, number> = {}
-    projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => {
+    // Tous les projets (pas seulement Won) — pondérés par win rate
+    projects.forEach(p => {
       const iso = getRevenueDateISO(p)
       if (!iso) return; const d = new Date(iso); const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`; revMap[k] = (revMap[k] || 0) + getRevenueMUR(p)
     })
     const depMap: Record<string, number> = {}
     depenses.forEach(d => { if (d.dossier) depMap[d.dossier] = (depMap[d.dossier] || 0) + d.montantMUR })
+    // Axe continu : min existant → max(current + 3 mois)
     const allKeys = new Set([...Object.keys(revMap), ...Object.keys(depMap)])
-    return [...allKeys].sort().map(k => ({ mois: k, label: fmtDossier(k), revenus: revMap[k] || 0, depenses: depMap[k] || 0 }))
-  }, [projects, depenses])
+    const curY = parseInt(currentDossier.slice(0, 2), 10)
+    const curM = parseInt(currentDossier.slice(2), 10)
+    // Ajouter current + 3 mois futurs
+    for (let i = 0; i <= 3; i++) {
+      let y = curY, m = curM + i
+      while (m > 12) { m -= 12; y += 1 }
+      allKeys.add(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
+    }
+    const sortedKeys = [...allKeys].sort()
+    // Remplir la plage continue entre min et max
+    const filled: string[] = []
+    if (sortedKeys.length >= 2) {
+      const [y1, m1] = [parseInt(sortedKeys[0].slice(0, 2), 10), parseInt(sortedKeys[0].slice(2), 10)]
+      const [y2, m2] = [parseInt(sortedKeys[sortedKeys.length - 1].slice(0, 2), 10), parseInt(sortedKeys[sortedKeys.length - 1].slice(2), 10)]
+      let y = y1, m = m1
+      while (y < y2 || (y === y2 && m <= m2)) {
+        filled.push(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
+        m++; if (m > 12) { m = 1; y++ }
+      }
+    } else if (sortedKeys.length === 1) {
+      filled.push(sortedKeys[0])
+    }
+    return filled.map(k => {
+      const isFuture = k > currentDossier
+      const inPast = k <= currentDossier
+      const inFuture = k >= currentDossier
+      const rev = revMap[k] || 0
+      return {
+        mois: k,
+        label: fmtDossier(k),
+        isFuture,
+        revenus: rev,
+        depenses: depMap[k] || 0,
+        // Split past/future pour rendu traits pleins/pointillés
+        revenusPast: inPast ? rev : null,
+        revenusFuture: inFuture ? rev : null,
+      }
+    })
+  }, [projects, depenses, currentDossier])
 
   // Revenus par mois ventilés par type de projet (hors Internal pour cohérence)
   // Couvre tous les mois de la série (revenus + dépenses) pour que l'axe soit continu
   const revParMoisParType = useMemo(() => {
     const byMois: Record<string, Record<string, number>> = {}
     const typesSet = new Set<string>()
-    projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status) && getRevenueRaw(p) > 0).forEach(p => {
+    // Tous les projets (pas seulement Won) — pondérés par win rate
+    projects.filter(p => getRevenueRaw(p) > 0).forEach(p => {
       const iso = getRevenueDateISO(p)
       if (!iso) return
       const d = new Date(iso)
@@ -360,16 +409,16 @@ export default function DashboardPage() {
     })
     const types = [...typesSet]
 
-    // Union de tous les mois présents (revenus + dépenses) pour avoir un axe continu
+    // Union des mois (revenus + dépenses) + current +3 pour futur
     const allMonths = new Set<string>(Object.keys(byMois))
     depenses.forEach(d => { if (d.dossier) allMonths.add(d.dossier) })
-    projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => {
-      const iso = getRevenueDateISO(p)
-      if (!iso) return
-      const d = new Date(iso)
-      allMonths.add(`${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`)
-    })
-    // Construire la plage continue entre min et max pour inclure aussi les mois vides
+    const curY = parseInt(currentDossier.slice(0, 2), 10)
+    const curM = parseInt(currentDossier.slice(2), 10)
+    for (let i = 0; i <= 3; i++) {
+      let y = curY, m = curM + i
+      while (m > 12) { m -= 12; y += 1 }
+      allMonths.add(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
+    }
     const sorted = [...allMonths].filter(Boolean).sort()
     const fillRange: string[] = []
     if (sorted.length >= 2) {
@@ -387,12 +436,20 @@ export default function DashboardPage() {
     return {
       types,
       data: fillRange.map(k => {
-        const row: Record<string, number | string> = { mois: k, label: fmtDossier(k) }
-        types.forEach(t => { row[t] = byMois[k]?.[t] || 0 })
+        const isFuture = k > currentDossier
+        const inPast = k <= currentDossier
+        const inFuture = k >= currentDossier
+        const row: Record<string, number | string | boolean | null> = { mois: k, label: fmtDossier(k), isFuture }
+        types.forEach(t => {
+          const v = byMois[k]?.[t] || 0
+          row[t] = v
+          row[`${t}__past`] = inPast ? v : null
+          row[`${t}__future`] = inFuture ? v : null
+        })
         return row
       }),
     }
-  }, [projects, depenses])
+  }, [projects, depenses, currentDossier])
 
   const depListByDossier = useMemo(() => {
     const m: Record<string, Depense[]> = {}
@@ -601,8 +658,9 @@ export default function DashboardPage() {
   , [projects])
 
   // ── Database Review Critical — santé des fiches projets ─────────
-  // Pour chaque projet, on vérifie si les champs essentiels sont remplis.
-  // Health = % de champs remplis sur la liste attendue.
+  // Règles :
+  //   - Projets type "Internal" EXCLUS (pas critiqués)
+  //   - Final Amount requis UNIQUEMENT pour projets passés (Start Date dans le passé)
   const PROJECT_REQUIRED_FIELDS: Array<{ key: string; label: string; check: (p: Project) => boolean }> = [
     { key: "name", label: "Name", check: p => !!p.name },
     { key: "status", label: "Status", check: p => !!p.status },
@@ -611,30 +669,33 @@ export default function DashboardPage() {
     { key: "quotedAmount", label: "Quoted Amount", check: p => p.quotedAmount > 0 },
     { key: "winPercent", label: "Win %", check: p => p.winPercent > 0 },
     { key: "riskLevel", label: "Risk Level", check: p => !!p.riskLevel },
-    { key: "clientName", label: "Client", check: p => !!p.clientName && p.clientName !== "N/A" },
+    { key: "clientName", label: "Client", check: p => !!p.clientName && p.clientName !== "N/A" && !!p.clientIds?.length },
     { key: "startDate", label: "Start Date", check: p => !!p.startDate },
     { key: "endDate", label: "End Date", check: p => !!p.endDate },
     { key: "methodology", label: "Methodology", check: p => !!p.methodology },
   ]
-  // Pour projets Won/Completed → on exige en plus Final Amount
-  const PROJECT_REQUIRED_WON: Array<{ key: string; label: string; check: (p: Project) => boolean }> = [
-    { key: "finalAmount", label: "Final Amount", check: p => p.finalAmount > 0 },
-  ]
+  const FINAL_AMOUNT_FIELD = { key: "finalAmount", label: "Final Amount", check: (p: Project) => p.finalAmount > 0 }
 
   const projectsHealth = useMemo(() => {
-    return projects.map(p => {
-      const checks = [...PROJECT_REQUIRED_FIELDS]
-      if (["Won", "Completed", "Won orally"].includes(p.status)) checks.push(...PROJECT_REQUIRED_WON)
-      const missing: string[] = []
-      let ok = 0
-      for (const f of checks) {
-        if (f.check(p)) ok++
-        else missing.push(f.label)
-      }
-      const total = checks.length
-      const pct = total > 0 ? Math.round((ok / total) * 100) : 0
-      return { project: p, health: pct, missing, total, ok }
-    })
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return projects
+      .filter(p => p.type !== "Internal") // Internal exclus du critique
+      .map(p => {
+        const checks = [...PROJECT_REQUIRED_FIELDS]
+        // Projet passé = startDate dans le passé (strictement)
+        const isPast = p.startDate ? (new Date(p.startDate).getTime() < today.getTime()) : false
+        if (isPast) checks.push(FINAL_AMOUNT_FIELD)
+        const missing: string[] = []
+        let ok = 0
+        for (const f of checks) {
+          if (f.check(p)) ok++
+          else missing.push(f.label)
+        }
+        const total = checks.length
+        const pct = total > 0 ? Math.round((ok / total) * 100) : 0
+        return { project: p, health: pct, missing, total, ok, isPast }
+      })
   }, [projects])
 
   const healthStats = useMemo(() => {
@@ -970,9 +1031,9 @@ export default function DashboardPage() {
           {/* ── Row Dépenses: mensuelles + par catégorie ── */}
           <div data-row="depenses" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16, order: 2 }}>
             <ChartCard
-              title="Dépenses mensuelles"
-              sub="Survolez un mois · cliquez pour figer"
-              value={`${Math.round(depTotalAll).toLocaleString("fr-FR")} MUR`}
+              title="Charges mensuelles"
+              sub="Salaires + Dépenses · survolez un mois · cliquez pour figer"
+              value={`${Math.round(depTotalAll + salaireMensuel * computeSalariedMonths("all")).toLocaleString("fr-FR")} MUR`}
               expandable
               renderExpanded={() => {
                 const filterMois = pinnedDepMois || depFsFilterMois
@@ -1008,6 +1069,7 @@ export default function DashboardPage() {
                           style={{ cursor: "pointer" }}
                         >
                           <defs>
+                            <linearGradient id="gSalFs" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f97316" stopOpacity={0.5} /><stop offset="100%" stopColor="#f97316" stopOpacity={0.05} /></linearGradient>
                             {allCats.map((cat, i) => {
                               const color = PIE_CAT[i % PIE_CAT.length]
                               return <linearGradient key={cat} id={`gCatFs${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.5} /><stop offset="100%" stopColor={color} stopOpacity={0.05} /></linearGradient>
@@ -1017,6 +1079,8 @@ export default function DashboardPage() {
                           <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
                           <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                           <Tooltip content={<CTooltip formatter={fmt} />} />
+                          {/* Salaires en base */}
+                          <Area type="monotone" dataKey="Salaires" stackId="1" stroke="#f97316" strokeWidth={0.5} fill="url(#gSalFs)" />
                           {allCats.map((cat, i) => (
                             <Area key={cat} type="monotone" dataKey={cat} stackId="1" stroke={PIE_CAT[i % PIE_CAT.length]} strokeWidth={0.5} fill={`url(#gCatFs${i})`} />
                           ))}
@@ -1025,6 +1089,10 @@ export default function DashboardPage() {
                       </ResponsiveContainer>
                       {/* Légende sous le chart */}
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, padding: "10px 0 0", borderTop: "1px solid rgba(166,201,206,0.08)", marginTop: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-2xs)" }}>
+                          <span style={{ width: 10, height: 10, borderRadius: 2, background: "#f97316" }} />
+                          <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>Salaires</span>
+                        </div>
                         {allCats.map((cat, i) => (
                           <div key={cat} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-2xs)" }}>
                             <span style={{ width: 10, height: 10, borderRadius: 2, background: PIE_CAT[i % PIE_CAT.length] }} />
@@ -1133,6 +1201,7 @@ export default function DashboardPage() {
                     style={{ cursor: "pointer" }}
                   >
                     <defs>
+                      <linearGradient id="gSal2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f97316" stopOpacity={0.5} /><stop offset="100%" stopColor="#f97316" stopOpacity={0.05} /></linearGradient>
                       {allCats.map((cat, i) => {
                         const color = PIE_CAT[i % PIE_CAT.length]
                         return <linearGradient key={cat} id={`gCat${i}`} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.5} /><stop offset="100%" stopColor={color} stopOpacity={0.05} /></linearGradient>
@@ -1142,6 +1211,8 @@ export default function DashboardPage() {
                     <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                     <Tooltip content={<CTooltip formatter={fmt} />} />
+                    {/* Salaires en base */}
+                    <Area type="monotone" dataKey="Salaires" stackId="1" stroke="#f97316" strokeWidth={0.5} fill="url(#gSal2)" />
                     {allCats.map((cat, i) => (
                       <Area key={cat} type="monotone" dataKey={cat} stackId="1" stroke={PIE_CAT[i % PIE_CAT.length]} strokeWidth={0.5} fill={`url(#gCat${i})`} />
                     ))}
@@ -1243,11 +1314,19 @@ export default function DashboardPage() {
                           <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                           <Tooltip content={<RevenueTooltip ventesListByMois={ventesListByMois} />} />
                           {revMode === "total" ? (
-                            <Area type="monotone" dataKey="revenus" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev2Fs)" dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#A6C9CE", strokeWidth: 0 }} />
+                            <>
+                              <Area type="monotone" dataKey="revenusPast" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev2Fs)" dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#A6C9CE", strokeWidth: 0 }} connectNulls={false} />
+                              <Area type="monotone" dataKey="revenusFuture" stroke="#A6C9CE" strokeWidth={2} strokeDasharray="5 4" fill="url(#gRev2Fs)" fillOpacity={0.4} dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#A6C9CE", strokeWidth: 0 }} connectNulls={false} />
+                            </>
                           ) : (
-                            revParMoisParType.types.map((t, i) => (
-                              <Area key={t} type="monotone" dataKey={t} stackId="revtypesfs" stroke={PIE_TYPE[i % PIE_TYPE.length]} strokeWidth={1} fill={`url(#gRevTypeFs${i})`} />
-                            ))
+                            <>
+                              {revParMoisParType.types.map((t, i) => (
+                                <Area key={`${t}-p`} type="monotone" dataKey={`${t}__past`} stackId="revtypesfsPast" stroke={PIE_TYPE[i % PIE_TYPE.length]} strokeWidth={1} fill={`url(#gRevTypeFs${i})`} connectNulls={false} />
+                              ))}
+                              {revParMoisParType.types.map((t, i) => (
+                                <Area key={`${t}-f`} type="monotone" dataKey={`${t}__future`} stackId="revtypesfsFuture" stroke={PIE_TYPE[i % PIE_TYPE.length]} strokeWidth={1} strokeDasharray="5 4" fill={`url(#gRevTypeFs${i})`} fillOpacity={0.4} connectNulls={false} />
+                              ))}
+                            </>
                           )}
                           {currentRevMois && <ReferenceLine x={fmtDossier(currentRevMois)} stroke={pinnedRevMois ? "var(--accent)" : "rgba(166,201,206,0.4)"} strokeWidth={pinnedRevMois ? 2 : 1} strokeDasharray={pinnedRevMois ? "0" : "3 3"} />}
                         </AreaChart>
@@ -1381,13 +1460,20 @@ export default function DashboardPage() {
                     <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                     <Tooltip content={<RevenueTooltip ventesListByMois={ventesListByMois} />} />
                     {revMode === "total" ? (
-                      <Area type="monotone" dataKey="revenus" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev2)" dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#A6C9CE", strokeWidth: 0 }} />
+                      <>
+                        <Area type="monotone" dataKey="revenusPast" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev2)" dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#A6C9CE", strokeWidth: 0 }} connectNulls={false} />
+                        <Area type="monotone" dataKey="revenusFuture" stroke="#A6C9CE" strokeWidth={2} strokeDasharray="5 4" fill="url(#gRev2)" fillOpacity={0.4} dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#A6C9CE", strokeWidth: 0 }} connectNulls={false} />
+                      </>
                     ) : (
-                      revParMoisParType.types.map((t, i) => (
-                        <Area key={t} type="monotone" dataKey={t} stackId="revtypes" stroke={PIE_TYPE[i % PIE_TYPE.length]} strokeWidth={1} fill={`url(#gRevType${i})`} />
-                      ))
+                      <>
+                        {revParMoisParType.types.map((t, i) => (
+                          <Area key={`${t}-p`} type="monotone" dataKey={`${t}__past`} stackId="revtypesPast" stroke={PIE_TYPE[i % PIE_TYPE.length]} strokeWidth={1} fill={`url(#gRevType${i})`} connectNulls={false} />
+                        ))}
+                        {revParMoisParType.types.map((t, i) => (
+                          <Area key={`${t}-f`} type="monotone" dataKey={`${t}__future`} stackId="revtypesFuture" stroke={PIE_TYPE[i % PIE_TYPE.length]} strokeWidth={1} strokeDasharray="5 4" fill={`url(#gRevType${i})`} fillOpacity={0.4} connectNulls={false} />
+                        ))}
+                      </>
                     )}
-                    {revMode === "types" && <Legend wrapperStyle={{ fontSize: 10 }} iconType="circle" />}
                     {pinnedRevMois && <ReferenceLine x={fmtDossier(pinnedRevMois)} stroke="var(--accent)" strokeWidth={2} />}
                   </AreaChart>
                 </ResponsiveContainer>
@@ -1854,6 +1940,8 @@ export default function DashboardPage() {
       {editProject && (
         <ProjectModal
           project={editProject}
+          clients={clients}
+          employees={employees}
           onClose={() => setEditProject(null)}
           onSave={handleSaveProject}
           saving={saving}
@@ -1863,6 +1951,8 @@ export default function DashboardPage() {
       {showAddVente && (
         <ProjectModal
           project={null}
+          clients={clients}
+          employees={employees}
           onClose={() => setShowAddVente(false)}
           onSave={handleSaveProject}
           saving={saving}
@@ -2420,8 +2510,8 @@ function ChartCard({ title, value, sub, right, children, renderExpanded, expanda
 
 // ─── Modals ───────────────────────────────────────────────────────────────────
 
-function ProjectModal({ project, onClose, onSave, saving }: {
-  project: Project | null; onClose: () => void; onSave: (data: any) => void; saving: boolean
+function ProjectModal({ project, clients, employees, onClose, onSave, saving }: {
+  project: Project | null; clients: Client[]; employees: Employee[]; onClose: () => void; onSave: (data: any) => void; saving: boolean
 }) {
   const isNew = !project
   const [form, setForm] = useState({
@@ -2437,6 +2527,9 @@ function ProjectModal({ project, onClose, onSave, saving }: {
     clientSatisfaction: project?.clientSatisfaction || "",
     startDate: project?.startDate || "",
     endDate: project?.endDate || "",
+    clientIds: project?.clientIds?.[0] || "",
+    commissionPercent: project?.commissionPercent || 0,
+    commissionTo: project?.commissionTo || "",
   })
 
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
@@ -2461,6 +2554,13 @@ function ProjectModal({ project, onClose, onSave, saving }: {
           <div style={{ gridColumn: "1 / -1" }}>
             <div style={fieldLabel}>Nom du projet</div>
             <input value={form.name} onChange={e => set("name", e.target.value)} style={fieldInput} />
+          </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={fieldLabel}>Client</div>
+            <select value={form.clientIds} onChange={e => set("clientIds", e.target.value)} style={fieldInput}>
+              <option value="">— Aucun —</option>
+              {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
           </div>
           <div>
             <div style={fieldLabel}>Status</div>
@@ -2520,6 +2620,17 @@ function ProjectModal({ project, onClose, onSave, saving }: {
           <div>
             <div style={fieldLabel}>Date de fin</div>
             <input type="date" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={fieldInput} />
+          </div>
+          <div style={{ gridColumn: "1 / -1", borderTop: "1px solid var(--border-subtle)", paddingTop: 12, marginTop: 4 }}>
+            <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Commission</div>
+          </div>
+          <div>
+            <div style={fieldLabel}>% of commissions (0-100)</div>
+            <input type="number" value={form.commissionPercent} onChange={e => set("commissionPercent", e.target.value)} style={fieldInput} min={0} max={100} step={0.1} />
+          </div>
+          <div>
+            <div style={fieldLabel}>Bénéficiaire (Ad-hoc commissions 1)</div>
+            <input value={form.commissionTo} onChange={e => set("commissionTo", e.target.value)} placeholder="nom du bénéficiaire" style={fieldInput} />
           </div>
         </div>
 
@@ -2838,13 +2949,19 @@ function HeroTooltip({ active, payload, label }: any) {
 
 function RevenueTooltip({ active, payload, label, ventesListByMois }: any) {
   if (!active || !payload?.length) return null
-  const rev = payload.find((p: any) => p.dataKey === "revenus")?.value ?? 0
-  const point = payload[0]?.payload; const moisCode = point?.mois || ""
+  const point = payload[0]?.payload
+  const moisCode = point?.mois || ""
+  const isFuture = !!point?.isFuture
+  // Lecture agrégée depuis le datum (fonctionne avec revenusPast/revenusFuture ou types par past/future)
+  const rev = point?.revenus ?? ((point?.revenusPast || 0) + (point?.revenusFuture || 0))
   const allVentes = (ventesListByMois?.[moisCode] || []) as Project[]
   const ventes = allVentes.slice(0, 5)
   return (
     <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "14px 18px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)", fontSize: "var(--fs-xs)", minWidth: 240, maxWidth: 340 }}>
-      <div style={{ fontWeight: 700, marginBottom: 10, color: "var(--text-secondary)", fontSize: "var(--fs-sm)" }}>{label}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ fontWeight: 700, color: "var(--text-secondary)", fontSize: "var(--fs-sm)" }}>{label}</div>
+        {isFuture && <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontStyle: "italic" }}>projection</span>}
+      </div>
       <TRow c="#A6C9CE" l="Revenus" v={`${Math.round(rev).toLocaleString("fr-FR")} MUR`} vc="#A6C9CE" />
       {ventes.length > 0 && (
         <div style={{ borderTop: "1px solid rgba(166,201,206,0.10)", paddingTop: 8, marginTop: 8 }}>
