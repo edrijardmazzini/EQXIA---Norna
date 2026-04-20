@@ -133,6 +133,41 @@ export async function GET() {
         else if (comPctProp.type === "formula") commissionPercent = getFormula(comPctProp) ?? 0
         else if (comPctProp.type === "percent" || comPctProp.type === "rollup") commissionPercent = comPctProp.percent ?? getFormula(comPctProp) ?? 0
       }
+      // Owner / Phase / Team Members — champs utilisés pour la vérification de santé (Internal + tous types)
+      let ownerIds: string[] = []
+      let ownerName = ""
+      const ownerProp = props["Owner"] || props["Project Owner"] || props["Responsable"]
+      if (ownerProp) {
+        if (ownerProp.type === "relation") {
+          ownerIds = getRelationIds(ownerProp)
+          ownerName = ownerIds.map(id => employeesMap[id] || "").filter(Boolean).join(", ")
+        } else if (ownerProp.type === "people") {
+          const people = ownerProp.people || []
+          ownerIds = people.map((u: any) => u.id).filter(Boolean)
+          ownerName = people.map((u: any) => u.name).filter(Boolean).join(", ")
+        } else if (ownerProp.type === "select") {
+          ownerName = getSelect(ownerProp)
+        } else if (ownerProp.type === "rich_text" || ownerProp.type === "title") {
+          ownerName = getText(ownerProp)
+        }
+      }
+      const phase = getSelect(props["Phase"] || {}) || getText(props["Phase"] || {})
+      let teamMemberIds: string[] = []
+      let teamMemberNames = ""
+      const teamProp = props["Team Members"] || props["Team"] || props["\u00c9quipe"] || props["Team members"]
+      if (teamProp) {
+        if (teamProp.type === "relation") {
+          teamMemberIds = getRelationIds(teamProp)
+          teamMemberNames = teamMemberIds.map(id => employeesMap[id] || "").filter(Boolean).join(", ")
+        } else if (teamProp.type === "people") {
+          const people = teamProp.people || []
+          teamMemberIds = people.map((u: any) => u.id).filter(Boolean)
+          teamMemberNames = people.map((u: any) => u.name).filter(Boolean).join(", ")
+        } else if (teamProp.type === "multi_select") {
+          teamMemberNames = (teamProp.multi_select || []).map((s: any) => s.name).join(", ")
+        }
+      }
+
       let commissionTo = ""
       const comToProp = props["Ad-hoc commissions 1 ? (eg training services)"] || props["Ad-hoc commissions 1"] || props["Commissionnaire"] || props["Commission à"]
       if (comToProp) {
@@ -164,8 +199,14 @@ export async function GET() {
         humanCost: getFormula(props["Human Internal Cost of project"]),
         clientIds: getRelationIds(props["Client"]),
         clientName: getRelationIds(props["Client"]).map(id => clientsMap[id] || "Inconnu").join(", ") || "N/A",
+        ownerIds,
+        ownerName,
+        phase,
+        teamMemberIds,
+        teamMemberNames,
         commissionPercent,
         commissionTo,
+        health: getFormula(props["Health"]) || "",
       }
     })
 

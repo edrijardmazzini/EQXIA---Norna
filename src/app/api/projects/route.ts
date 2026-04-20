@@ -14,7 +14,7 @@ function headers() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { name, status, type, methodology, currency, quotedAmount, finalAmount, startDate, endDate, clientSatisfaction, riskLevel, winPercent, clientIds, commissionPercent, commissionTo } = body
+    const { name, status, type, methodology, currency, quotedAmount, finalAmount, startDate, endDate, clientSatisfaction, riskLevel, winPercent, clientIds, ownerIds, phase, teamMemberIds, commissionPercent, commissionTo } = body
 
     const properties: Record<string, unknown> = {
       Name: { title: [{ text: { content: name || "" } }] },
@@ -41,6 +41,15 @@ export async function POST(req: NextRequest) {
     if (commissionTo) {
       properties["Ad-hoc commissions 1 ? (eg training services)"] = { rich_text: [{ text: { content: String(commissionTo) } }] }
     }
+    if (ownerIds) {
+      const ids: string[] = Array.isArray(ownerIds) ? ownerIds : [ownerIds]
+      properties["Owner"] = { relation: ids.map(id => ({ id })) }
+    }
+    if (phase) {
+      properties["Phase"] = { select: { name: String(phase) } }
+    }
+    // Team Members est un "person" (user picker Notion) — non éditable depuis le site
+    void teamMemberIds
 
     const res = await fetch("https://api.notion.com/v1/pages", {
       method: "POST",

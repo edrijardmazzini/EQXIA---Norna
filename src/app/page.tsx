@@ -18,7 +18,11 @@ interface Project {
   rentabilite: number | null; netAmount: number | null; humanCost: number | null
   clientName: string; clientSatisfaction?: string
   clientIds?: string[]
+  ownerIds?: string[]; ownerName?: string
+  phase?: string
+  teamMemberIds?: string[]; teamMemberNames?: string
   commissionPercent?: number; commissionTo?: string
+  health?: string // "❌ Critical" | "⚠️ Warning" | "✅ OK" — calculé par la formule Notion
 }
 
 interface Client { id: string; name: string }
@@ -650,66 +654,81 @@ export default function DashboardPage() {
   , [projects])
 
   // ── Database Review Critical — santé des fiches projets ─────────
-  // Règles :
-  //   - Projets type "Internal" EXCLUS (pas critiqués)
-  //   - Final Amount requis UNIQUEMENT pour projets passés (Start Date dans le passé)
-  const PROJECT_REQUIRED_FIELDS: Array<{ key: string; label: string; check: (p: Project) => boolean }> = [
-    { key: "name", label: "Name", check: p => !!p.name },
-    { key: "status", label: "Status", check: p => !!p.status },
-    { key: "type", label: "Type", check: p => !!p.type },
-    { key: "currency", label: "Currency", check: p => !!p.currency },
-    { key: "quotedAmount", label: "Quoted Amount", check: p => p.quotedAmount > 0 },
-    { key: "winPercent", label: "Win %", check: p => p.winPercent > 0 },
-    { key: "riskLevel", label: "Risk Level", check: p => !!p.riskLevel },
-    { key: "clientName", label: "Client", check: p => !!p.clientName && p.clientName !== "N/A" && !!p.clientIds?.length },
-    { key: "startDate", label: "Start Date", check: p => !!p.startDate },
-    { key: "endDate", label: "End Date", check: p => !!p.endDate },
-    { key: "methodology", label: "Methodology", check: p => !!p.methodology },
+  // La valeur Health est calculée par une formule Notion (champ "Health").
+  // Valeurs possibles : "❌ Critical" / "⚠️ Warning" / "✅ OK" (ou vide)
+  // Le site se contente d'AFFICHER cette valeur + liste les champs manquants pour aide.
+  //
+  // Pour chaque projet, on détermine aussi les champs potentiellement manquants (affichage uniquement).
+  const PROJECT_REQUIRED_INTERNAL_LABELS: Array<{ label: string; check: (p: Project) => boolean }> = [
+    { label: "Owner", check: p => !!p.ownerName || !!p.ownerIds?.length },
+    { label: "Client", check: p => !!p.clientName && p.clientName !== "N/A" && !!p.clientIds?.length },
+    { label: "Phase", check: p => !!p.phase },
+    { label: "Methodology", check: p => !!p.methodology },
+    { label: "Status", check: p => !!p.status },
+    { label: "Start Date", check: p => !!p.startDate },
+    { label: "Team Members", check: p => !!p.teamMemberNames || !!p.teamMemberIds?.length },
   ]
-  const FINAL_AMOUNT_FIELD = { key: "finalAmount", label: "Final Amount", check: (p: Project) => p.finalAmount > 0 }
+  const PROJECT_REQUIRED_STANDARD_LABELS: Array<{ label: string; check: (p: Project) => boolean }> = [
+    { label: "Name", check: p => !!p.name },
+    { label: "Status", check: p => !!p.status },
+    { label: "Type", check: p => !!p.type },
+    { label: "Currency", check: p => !!p.currency },
+    { label: "Quoted Amount", check: p => p.quotedAmount > 0 },
+    { label: "Win %", check: p => p.winPercent > 0 },
+    { label: "Risk Level", check: p => !!p.riskLevel },
+    { label: "Client", check: p => !!p.clientName && p.clientName !== "N/A" && !!p.clientIds?.length },
+    { label: "Start Date", check: p => !!p.startDate },
+    { label: "End Date", check: p => !!p.endDate },
+    { label: "Methodology", check: p => !!p.methodology },
+  ]
 
   const projectsHealth = useMemo(() => {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
-    return projects
-      .filter(p => p.type !== "Internal") // Internal exclus du critique
-      .map(p => {
-        const checks = [...PROJECT_REQUIRED_FIELDS]
-        // Projet passé = startDate dans le passé (strictement)
+    return projects.map(p => {
+      const isInternal = p.type === "Internal"
+      const healthLabel = p.health || ""
+      const isCritical = healthLabel.includes("Critical")
+      const isWarning = healthLabel.includes("Warning")
+      const isOK = healthLabel.includes("OK")
+      const labels = isInternal ? PROJECT_REQUIRED_INTERNAL_LABELS : PROJECT_REQUIRED_STANDARD_LABELS
+      const missing: string[] = []
+      for (const f of labels) {
+        if (!f.check(p)) missing.push(f.label)
+      }
+      // Final Amount : manquant seulement pour projets non-Internal et passés
+      if (!isInternal) {
         const isPast = p.startDate ? (new Date(p.startDate).getTime() < today.getTime()) : false
-        if (isPast) checks.push(FINAL_AMOUNT_FIELD)
-        const missing: string[] = []
-        let ok = 0
-        for (const f of checks) {
-          if (f.check(p)) ok++
-          else missing.push(f.label)
-        }
-        const total = checks.length
-        const pct = total > 0 ? Math.round((ok / total) * 100) : 0
-        return { project: p, health: pct, missing, total, ok, isPast }
-      })
+        if (isPast && !(p.finalAmount > 0)) missing.push("Final Amount")
+      }
+      return { project: p, healthLabel, isCritical, isWarning, isOK, missing, isInternal }
+    })
   }, [projects])
 
   const healthStats = useMemo(() => {
     const total = projectsHealth.length
-    const healthy = projectsHealth.filter(h => h.health === 100).length
-    const partial = projectsHealth.filter(h => h.health >= 60 && h.health < 100).length
-    const critical = projectsHealth.filter(h => h.health < 60).length
-    const avgHealth = total > 0 ? Math.round(projectsHealth.reduce((s, h) => s + h.health, 0) / total) : 0
+    const critical = projectsHealth.filter(h => h.isCritical).length
+    const warning = projectsHealth.filter(h => h.isWarning).length
+    const ok = projectsHealth.filter(h => h.isOK).length
+    const unclassified = total - critical - warning - ok
     const missingFieldCounts: Record<string, number> = {}
-    projectsHealth.forEach(h => h.missing.forEach(f => { missingFieldCounts[f] = (missingFieldCounts[f] || 0) + 1 }))
+    projectsHealth.filter(h => h.isCritical).forEach(h => h.missing.forEach(f => { missingFieldCounts[f] = (missingFieldCounts[f] || 0) + 1 }))
     const topMissing = Object.entries(missingFieldCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
-    return { total, healthy, partial, critical, avgHealth, topMissing }
+    return { total, ok, warning, critical, unclassified, topMissing }
   }, [projectsHealth])
 
-  const [healthFilter, setHealthFilter] = useState<"all" | "partial" | "critical">("critical")
+  const [healthFilter, setHealthFilter] = useState<"all" | "warning" | "critical">("critical")
   const filteredHealth = useMemo(() => {
     const list = healthFilter === "all"
       ? projectsHealth
-      : healthFilter === "partial"
-        ? projectsHealth.filter(h => h.health >= 60 && h.health < 100)
-        : projectsHealth.filter(h => h.health < 60)
-    return [...list].sort((a, b) => a.health - b.health)
+      : healthFilter === "warning"
+        ? projectsHealth.filter(h => h.isWarning)
+        : projectsHealth.filter(h => h.isCritical)
+    // Tri : Critical en premier, puis Warning, puis OK
+    return [...list].sort((a, b) => {
+      const score = (h: typeof a) => h.isCritical ? 0 : h.isWarning ? 1 : h.isOK ? 2 : 3
+      return score(a) - score(b)
+    })
   }, [projectsHealth, healthFilter])
 
   // ── Cash / Commissions ────────────────────────────────────────
@@ -1807,34 +1826,29 @@ export default function DashboardPage() {
               <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{healthStats.total} projet(s) analysé(s)</div>
             </div>
 
-            {/* KPIs Health */}
+            {/* KPIs Health — lu depuis la formule Notion */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 0 }}>
               <div style={{ padding: "18px 20px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>Santé moyenne</div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 6 }}>
-                  <span style={{ fontSize: 26, fontWeight: 800, color: healthStats.avgHealth >= 80 ? "#22c55e" : healthStats.avgHealth >= 60 ? "#facc15" : "#ef4444", fontFamily: "monospace" }}>{healthStats.avgHealth}</span>
-                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>%</span>
-                </div>
-                <div style={{ height: 6, background: "rgba(166,201,206,0.1)", borderRadius: 3, marginTop: 8, overflow: "hidden" }}>
-                  <div style={{ height: "100%", width: `${healthStats.avgHealth}%`, background: healthStats.avgHealth >= 80 ? "#22c55e" : healthStats.avgHealth >= 60 ? "#facc15" : "#ef4444", transition: "width 0.3s" }} />
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>Total projets</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: "var(--text-primary)", fontFamily: "monospace", marginTop: 6 }}>{healthStats.total}</div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>Valeurs Notion (Health)</div>
+              </div>
+              <div style={{ padding: "18px 20px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>✅ OK</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: "#22c55e", fontFamily: "monospace", marginTop: 6 }}>{healthStats.ok}</div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
+                  {healthStats.total > 0 ? Math.round((healthStats.ok / healthStats.total) * 100) : 0} % des projets
                 </div>
               </div>
               <div style={{ padding: "18px 20px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>✓ Complets (100%)</div>
-                <div style={{ fontSize: 26, fontWeight: 800, color: "#22c55e", fontFamily: "monospace", marginTop: 6 }}>{healthStats.healthy}</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>⚠️ Warning</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: "#facc15", fontFamily: "monospace", marginTop: 6 }}>{healthStats.warning}</div>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
-                  {healthStats.total > 0 ? Math.round((healthStats.healthy / healthStats.total) * 100) : 0} % des projets
-                </div>
-              </div>
-              <div style={{ padding: "18px 20px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>⚠ Partiels (60-99%)</div>
-                <div style={{ fontSize: 26, fontWeight: 800, color: "#facc15", fontFamily: "monospace", marginTop: 6 }}>{healthStats.partial}</div>
-                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
-                  {healthStats.total > 0 ? Math.round((healthStats.partial / healthStats.total) * 100) : 0} % des projets
+                  {healthStats.total > 0 ? Math.round((healthStats.warning / healthStats.total) * 100) : 0} % des projets
                 </div>
               </div>
               <div style={{ padding: "18px 20px" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>✕ Critiques (&lt; 60%)</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>❌ Critical</div>
                 <div style={{ fontSize: 26, fontWeight: 800, color: "#ef4444", fontFamily: "monospace", marginTop: 6 }}>{healthStats.critical}</div>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
                   {healthStats.total > 0 ? Math.round((healthStats.critical / healthStats.total) * 100) : 0} % des projets
@@ -1842,10 +1856,10 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* Top champs manquants */}
+            {/* Top champs manquants (parmi les Critical) */}
             {healthStats.topMissing.length > 0 && (
               <div style={{ padding: "12px 24px", borderTop: "1px solid rgba(166,201,206,0.08)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Top champs manquants :</div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Top champs manquants (Critical) :</div>
                 {healthStats.topMissing.map(([field, count]) => (
                   <span key={field} style={{ fontSize: "var(--fs-2xs)", color: "var(--text-primary)", background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", padding: "2px 8px", borderRadius: 4, fontWeight: 600 }}>
                     {field} <span style={{ color: "var(--text-muted)", fontFamily: "monospace", marginLeft: 4 }}>× {count}</span>
@@ -1863,7 +1877,7 @@ export default function DashboardPage() {
                 <Seg
                   value={healthFilter}
                   onChange={v => setHealthFilter(v as any)}
-                  options={[["critical", "Critiques < 60%"], ["partial", "Partiels"], ["all", "Tous"]]}
+                  options={[["critical", "❌ Critical"], ["warning", "⚠️ Warning"], ["all", "Tous"]]}
                 />
               </div>
               {filteredHealth.length === 0 ? (
@@ -1875,7 +1889,8 @@ export default function DashboardPage() {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
                     <thead style={{ position: "sticky", top: 0, background: "var(--bg-panel)", zIndex: 2 }}>
                       <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
-                        <th style={{ ...thStyle, width: 80 }}>Santé</th>
+                        <th style={{ ...thStyle, width: 120 }}>Santé (Notion)</th>
+                        <th style={{ ...thStyle, width: 80 }}>Type</th>
                         <th style={thStyle}>Projet</th>
                         <th style={thStyle}>Client</th>
                         <th style={thStyle}>Status</th>
@@ -1883,8 +1898,8 @@ export default function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredHealth.map(({ project: p, health, missing }, i) => {
-                        const color = health >= 80 ? "#22c55e" : health >= 60 ? "#facc15" : "#ef4444"
+                      {filteredHealth.map(({ project: p, healthLabel, isCritical, isWarning, isOK, missing, isInternal }, i) => {
+                        const color = isCritical ? "#ef4444" : isWarning ? "#facc15" : isOK ? "#22c55e" : "var(--text-muted)"
                         return (
                           <tr
                             key={p.id || i}
@@ -1894,12 +1909,13 @@ export default function DashboardPage() {
                             onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                           >
                             <td style={tdStyle}>
-                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                <span style={{ fontFamily: "monospace", fontWeight: 700, color, minWidth: 36 }}>{health}%</span>
-                                <div style={{ flex: 1, height: 4, background: "rgba(166,201,206,0.1)", borderRadius: 2, overflow: "hidden", minWidth: 24 }}>
-                                  <div style={{ height: "100%", width: `${health}%`, background: color }} />
-                                </div>
-                              </div>
+                              <span style={{ fontSize: "var(--fs-2xs)", fontWeight: 700, color, background: `${color === "var(--text-muted)" ? "rgba(166,201,206,0.1)" : color + "22"}`, padding: "2px 6px", borderRadius: 4, whiteSpace: "nowrap" }}>
+                                {healthLabel || "—"}
+                              </span>
+                            </td>
+                            <td style={tdStyle}>
+                              {isInternal && <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", background: "rgba(166,201,206,0.1)", padding: "1px 6px", borderRadius: 3, fontWeight: 600 }}>Internal</span>}
+                              {!isInternal && p.type && <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-secondary)" }}>{p.type}</span>}
                             </td>
                             <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name || <em style={{ color: "var(--color-error)" }}>(sans nom)</em>}</td>
                             <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName || "—"}</td>
@@ -2542,6 +2558,9 @@ function ProjectModal({ project, clients, employees, onClose, onSave, saving }: 
     startDate: project?.startDate || "",
     endDate: project?.endDate || "",
     clientIds: project?.clientIds?.[0] || "",
+    ownerIds: project?.ownerIds?.[0] || "",
+    phase: project?.phase || "",
+    teamMemberIds: project?.teamMemberIds || [] as string[],
     commissionPercent: project?.commissionPercent || 0,
     commissionTo: project?.commissionTo || "",
   })
@@ -2575,6 +2594,29 @@ function ProjectModal({ project, clients, employees, onClose, onSave, saving }: 
               <option value="">— Aucun —</option>
               {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+          </div>
+          <div>
+            <div style={fieldLabel}>Owner</div>
+            <select value={form.ownerIds} onChange={e => set("ownerIds", e.target.value)} style={fieldInput}>
+              <option value="">— Aucun —</option>
+              {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={fieldLabel}>Phase</div>
+            <input value={form.phase} onChange={e => set("phase", e.target.value)} placeholder="ex: Discovery / Build / Handover" style={fieldInput} />
+          </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <div style={fieldLabel}>Team Members <span style={{ color: "var(--text-muted)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>· à modifier directement dans Notion</span></div>
+            <div style={{ padding: 8, background: "var(--bg-input)", border: "1px solid var(--border-input)", borderRadius: "var(--radius-input)", minHeight: 36, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", opacity: 0.75 }}>
+              {project?.teamMemberNames ? (
+                project.teamMemberNames.split(", ").filter(Boolean).map(n => (
+                  <span key={n} style={{ fontSize: "var(--fs-2xs)", background: "var(--accent-soft)", color: "var(--accent)", padding: "2px 8px", borderRadius: 4, fontWeight: 600 }}>{n}</span>
+                ))
+              ) : (
+                <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontStyle: "italic" }}>Aucun membre — ouvrir dans Notion pour ajouter</span>
+              )}
+            </div>
           </div>
           <div>
             <div style={fieldLabel}>Status</div>

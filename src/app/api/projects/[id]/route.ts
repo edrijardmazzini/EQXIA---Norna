@@ -14,7 +14,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   try {
     const { id } = await params
     const body = await req.json()
-    const { name, status, type, methodology, currency, quotedAmount, finalAmount, startDate, endDate, clientSatisfaction, riskLevel, winPercent, clientIds, commissionPercent, commissionTo } = body
+    const { name, status, type, methodology, currency, quotedAmount, finalAmount, startDate, endDate, clientSatisfaction, riskLevel, winPercent, clientIds, ownerIds, phase, teamMemberIds, commissionPercent, commissionTo } = body
 
     const properties: Record<string, unknown> = {}
 
@@ -41,6 +41,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (commissionTo !== undefined && commissionTo !== "") {
       properties["Ad-hoc commissions 1 ? (eg training services)"] = { rich_text: [{ text: { content: String(commissionTo) } }] }
     }
+    // Owner — tenté en relation (si c'est une relation → Employees)
+    if (ownerIds !== undefined) {
+      const ids: string[] = Array.isArray(ownerIds) ? ownerIds : (ownerIds ? [ownerIds] : [])
+      properties["Owner"] = { relation: ids.map(id => ({ id })) }
+    }
+    if (phase !== undefined) {
+      properties["Phase"] = phase ? { select: { name: String(phase) } } : { select: null }
+    }
+    // Team Members est un "person" (user picker Notion) — non éditable depuis le site
+    // (nos IDs sont des Employees, pas des Notion users). On ignore teamMemberIds volontairement.
+    void teamMemberIds
 
     const res = await fetch(`https://api.notion.com/v1/pages/${id}`, {
       method: "PATCH",
