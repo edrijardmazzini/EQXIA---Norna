@@ -526,28 +526,34 @@ export default function DashboardPage() {
 
     return codes.map(m => {
       const isFuture = m > curCode
+      const isCurrent = m === curCode
       const rev = rM[m] || 0
       const dep = dM[m] || 0
       const sal = m >= SALAIRE_START_CODE ? salaireMensuel : 0
       const revVal = isFuture ? 0 : rev
       const depVal = isFuture ? 0 : dep
+      // Past : valeurs pour m <= curCode (y compris le mois courant)
+      // Future : valeurs pour m >= curCode (y compris le mois courant) → point partagé pour lisser la transition
+      const inPast = m <= curCode
+      const inFuture = m >= curCode
       return {
         mois: m,
         label: fmtDossier(m),
         isFuture,
-        // Agrégés (tooltip + totaux)
+        isCurrent,
+        // Agrégés (pour tooltip + totaux)
         depenses: depVal,
         revenus: revVal,
         salaires: sal,
-        // Net (charges = dép + sal) seulement sur le passé ; future = null pour créer un vide
+        // Net : seulement sur le passé
         net: isFuture ? null : (rev - dep - sal),
-        // Split passé/futur : null = rien rendu, sinon valeur rendue
-        depensesPast: isFuture ? null : depVal,
-        depensesFuture: isFuture ? depVal : null,
-        revenusPast: isFuture ? null : revVal,
-        revenusFuture: isFuture ? revVal : null,
-        salairesPast: isFuture ? null : sal,
-        salairesFuture: isFuture ? sal : null,
+        // Split passé/futur — le mois courant appartient aux DEUX pour connecter visuellement
+        depensesPast: inPast ? depVal : null,
+        depensesFuture: inFuture ? depVal : null,
+        revenusPast: inPast ? revVal : null,
+        revenusFuture: inFuture ? revVal : null,
+        salairesPast: inPast ? sal : null,
+        salairesFuture: inFuture ? sal : null,
       } as any
     })
   }, [depenses, projects, heroMode, heroPast, heroFuture, heroCustomStart, heroCustomEnd, currentDossier, fyStartYear, salaireMensuel])
@@ -2587,19 +2593,28 @@ function Seg({ value, onChange, options }: { value: string; onChange: (v: string
 
 function HeroTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
-  const dep = payload.find((p: any) => p.dataKey === "depenses")?.value ?? 0
-  const rev = payload.find((p: any) => p.dataKey === "revenus")?.value ?? 0
-  const sal = payload.find((p: any) => p.dataKey === "salaires")?.value ?? 0
-  const net = rev - dep
+  // Lecture depuis le datum (agrégé) pour éviter les doublons past/future
+  const datum = payload[0]?.payload
+  if (!datum) return null
+  const dep = datum.depenses || 0
+  const rev = datum.revenus || 0
+  const sal = datum.salaires || 0
+  const isFuture = !!datum.isFuture
+  const net = isFuture ? null : (rev - dep - sal)
   return (
-    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "14px 18px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)", fontSize: "var(--fs-xs)", minWidth: 200 }}>
-      <div style={{ fontWeight: 700, marginBottom: 10, color: "var(--text-secondary)", fontSize: "var(--fs-sm)" }}>{label}</div>
+    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "14px 18px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)", fontSize: "var(--fs-xs)", minWidth: 220 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ fontWeight: 700, color: "var(--text-secondary)", fontSize: "var(--fs-sm)" }}>{label}</div>
+        {isFuture && <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontStyle: "italic" }}>projection</span>}
+      </div>
       <TRow c="#A6C9CE" l="Revenus" v={Math.round(rev).toLocaleString("fr-FR")} vc="#A6C9CE" />
       <TRow c="#ef4444" l="Dépenses" v={Math.round(dep).toLocaleString("fr-FR")} vc="#ef4444" />
       {sal > 0 && <TRow c="#f97316" l="Salaires" v={Math.round(sal).toLocaleString("fr-FR")} vc="#f97316" />}
-      <div style={{ borderTop: "1px solid rgba(166,201,206,0.10)", paddingTop: 6, marginTop: 6 }}>
-        <TRow c={net >= 0 ? "#22c55e" : "#ef4444"} l="Net" v={`${net >= 0 ? "+" : ""}${Math.round(net).toLocaleString("fr-FR")}`} vc={net >= 0 ? "#22c55e" : "#ef4444"} bold />
-      </div>
+      {net != null && (
+        <div style={{ borderTop: "1px solid rgba(166,201,206,0.10)", paddingTop: 6, marginTop: 6 }}>
+          <TRow c={net >= 0 ? "#22c55e" : "#ef4444"} l="Net" v={`${net >= 0 ? "+" : ""}${Math.round(net).toLocaleString("fr-FR")}`} vc={net >= 0 ? "#22c55e" : "#ef4444"} bold />
+        </div>
+      )}
     </div>
   )
 }
