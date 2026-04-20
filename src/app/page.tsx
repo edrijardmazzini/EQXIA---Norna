@@ -94,8 +94,11 @@ function getFiscalQuarter(d: Date): { q: number; startCode: string; endCode: str
   const startCode = `${String(qStartY).slice(2)}${String(qStartM).padStart(2, "0")}`
   const endM = qStartM + 2
   const endCode = `${String(qStartY).slice(2)}${String(endM).padStart(2, "0")}`
-  const { label: fyLabel } = getFiscalYear(d)
-  return { q, startCode, endCode, label: `Q${q} FY ${fyLabel}` }
+  // FY au format court : "2025-26"
+  const { start: fyStart } = getFiscalYear(d)
+  const fyStartYear = fyStart.getFullYear()
+  const shortFy = `${fyStartYear}-${String(fyStartYear + 1).slice(-2)}`
+  return { q, startCode, endCode, label: `Q${q} FY ${shortFy}` }
 }
 
 const CURRENCY_OPTIONS = ["MUR", "EUR", "USD", "GBP"]
@@ -526,16 +529,26 @@ export default function DashboardPage() {
       const rev = rM[m] || 0
       const dep = dM[m] || 0
       const sal = m >= SALAIRE_START_CODE ? salaireMensuel : 0
+      const revVal = isFuture ? 0 : rev
+      const depVal = isFuture ? 0 : dep
       return {
         mois: m,
         label: fmtDossier(m),
         isFuture,
-        depenses: isFuture ? 0 : dep,
-        revenus: isFuture ? 0 : rev,
+        // Agrégés (tooltip + totaux)
+        depenses: depVal,
+        revenus: revVal,
         salaires: sal,
         // Net (charges = dép + sal) seulement sur le passé ; future = null pour créer un vide
         net: isFuture ? null : (rev - dep - sal),
-      }
+        // Split passé/futur : null = rien rendu, sinon valeur rendue
+        depensesPast: isFuture ? null : depVal,
+        depensesFuture: isFuture ? depVal : null,
+        revenusPast: isFuture ? null : revVal,
+        revenusFuture: isFuture ? revVal : null,
+        salairesPast: isFuture ? null : sal,
+        salairesFuture: isFuture ? sal : null,
+      } as any
     })
   }, [depenses, projects, heroMode, heroPast, heroFuture, heroCustomStart, heroCustomEnd, currentDossier, fyStartYear, salaireMensuel])
   const heroTotalDep = useMemo(() => heroData.filter(d => !d.isFuture).reduce((s, d) => s + (d.depenses || 0), 0), [heroData])
@@ -749,24 +762,24 @@ export default function DashboardPage() {
               label="Average Margin"
               value={`${avgMarginWithSalaries.toFixed(1)}%`}
               unit=""
-              sub={`Rev ${revPeriodLabel} − Charges (dép & sal) ${depPeriodLabel}`}
+              sub={`Rev − Charges (${periodLabel(kpiPeriod)})`}
               valueColor={avgMarginWithSalaries >= 0 ? "var(--accent)" : "var(--color-error)"}
             />
 
-            {/* Charges (Dépenses + Salaires) card with toggle */}
+            {/* Charges (Dépenses + Salaires) card with toggle — aligné avec les autres KpiCard */}
             <div style={card}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>Charges (Dépenses &amp; Salaires)</div>
                 <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>💸</div>
-              </div>
-              <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontFamily: "monospace", marginBottom: 3 }}>
-                {Math.round(salairesForDepPeriod).toLocaleString("fr-FR")} <span style={{ color: "#f97316" }}>sal</span> + {Math.round(depTotal).toLocaleString("fr-FR")} <span style={{ color: "#ef4444" }}>dép</span> =
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <span style={{ fontSize: 28, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em", lineHeight: 1 }}>{Math.round(chargesTotal).toLocaleString("fr-FR")}</span>
                 <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>MUR</span>
               </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+              <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontFamily: "monospace", marginTop: 6 }}>
+                {Math.round(salairesForDepPeriod).toLocaleString("fr-FR")} <span style={{ color: "#f97316" }}>sal</span> + {Math.round(depTotal).toLocaleString("fr-FR")} <span style={{ color: "#ef4444" }}>dép</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{depPeriodLabel}</div>
                 <Seg value={kpiPeriod} onChange={v => setKpiPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
               </div>
@@ -832,14 +845,20 @@ export default function DashboardPage() {
                     <linearGradient id="gRev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#A6C9CE" stopOpacity={0.35} /><stop offset="95%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.06)" />
+                  {/* Trait y=0 plein blanc, derrière les séries */}
+                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.35)" strokeWidth={1} ifOverflow="extendDomain" {...({ isFront: false } as any)} />
                   <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
                   <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.55)" strokeDasharray="4 4" strokeWidth={1.5} ifOverflow="extendDomain" label={{ value: "0", position: "insideLeft", fill: "var(--text-muted)", fontSize: 10 }} />
                   <Tooltip content={<HeroTooltip />} />
-                  {/* Charges empilées : salaires en base, dépenses par-dessus */}
-                  <Area type="monotone" dataKey="salaires" stackId="charges" stroke="#f97316" strokeWidth={2} fill="url(#gSal)" strokeDasharray={heroMode === "future" ? "5 4" : undefined} dot={false} activeDot={{ r: 4, fill: "#f97316", strokeWidth: 0 }} />
-                  <Area type="monotone" dataKey="depenses" stackId="charges" stroke="#ef4444" strokeWidth={2} fill="url(#gDep)" strokeDasharray={heroMode === "future" ? "5 4" : undefined} dot={false} activeDot={{ r: 4, fill: "#ef4444", strokeWidth: 0 }} />
-                  <Area type="monotone" dataKey="revenus" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev)" strokeDasharray={heroMode === "future" ? "5 4" : undefined} dot={false} activeDot={{ r: 4, fill: "#A6C9CE", strokeWidth: 0 }} />
+                  {/* ── PASSÉ : traits pleins, charges empilées (salaires base, dépenses dessus) ── */}
+                  <Area type="monotone" dataKey="salairesPast" stackId="chargesPast" stroke="#f97316" strokeWidth={2} fill="url(#gSal)" dot={false} activeDot={{ r: 4, fill: "#f97316", strokeWidth: 0 }} connectNulls={false} />
+                  <Area type="monotone" dataKey="depensesPast" stackId="chargesPast" stroke="#ef4444" strokeWidth={2} fill="url(#gDep)" dot={false} activeDot={{ r: 4, fill: "#ef4444", strokeWidth: 0 }} connectNulls={false} />
+                  <Area type="monotone" dataKey="revenusPast" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev)" dot={false} activeDot={{ r: 4, fill: "#A6C9CE", strokeWidth: 0 }} connectNulls={false} />
+                  {/* ── FUTUR : traits en pointillés ── */}
+                  <Area type="monotone" dataKey="salairesFuture" stackId="chargesFuture" stroke="#f97316" strokeWidth={2} strokeDasharray="5 4" fill="url(#gSal)" fillOpacity={0.5} dot={false} activeDot={{ r: 4, fill: "#f97316", strokeWidth: 0 }} connectNulls={false} />
+                  <Area type="monotone" dataKey="depensesFuture" stackId="chargesFuture" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 4" fill="url(#gDep)" fillOpacity={0.5} dot={false} activeDot={{ r: 4, fill: "#ef4444", strokeWidth: 0 }} connectNulls={false} />
+                  <Area type="monotone" dataKey="revenusFuture" stroke="#A6C9CE" strokeWidth={2} strokeDasharray="5 4" fill="url(#gRev)" fillOpacity={0.5} dot={false} activeDot={{ r: 4, fill: "#A6C9CE", strokeWidth: 0 }} connectNulls={false} />
+                  {/* ── Net : ligne verte pleine (pas de futur) ── */}
                   <Line type="monotone" dataKey="net" stroke="#22c55e" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#22c55e", strokeWidth: 0 }} connectNulls={false} />
                 </AreaChart>
               </ResponsiveContainer>
