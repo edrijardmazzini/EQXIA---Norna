@@ -28,6 +28,7 @@ interface Depense {
   id: string; description: string; date: string; fournisseur: string
   categorie: string; sousCategorie: string; montant: number
   montantMUR: number; devise: string; dossier: string; payePar: string
+  recurringCritical?: boolean
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -54,13 +55,22 @@ const toMUR = (amount: number, currency: string | undefined | null): number => {
   return (amount || 0) * rate
 }
 
-// Règle revenus : Net Amount (formule) → sinon Final Amount → sinon Quoted Amount
+// Règle revenus : Quoted Amount × Win % (gut feeling), normalisé
+// Permet de projeter le futur sans biaiser le passé (projets gagnés → win = 100%)
+function getWinRate(p: Project): number {
+  const w = Number(p.winPercent || 0)
+  if (w <= 0) return 0
+  return w > 1 ? w / 100 : w
+}
 function getRevenueRaw(p: Project): number {
-  if (p.netAmount != null && p.netAmount !== 0) return p.netAmount as number
-  if (p.finalAmount && p.finalAmount !== 0) return p.finalAmount
-  return p.quotedAmount || 0
+  return (p.quotedAmount || 0) * getWinRate(p)
 }
 const getRevenueMUR = (p: Project): number => toMUR(getRevenueRaw(p), p.currency)
+
+// Mois associé au revenu : End Date (fallback Start Date)
+function getRevenueDateISO(p: Project): string {
+  return p.endDate || p.startDate || ""
+}
 
 // Année fiscale : juillet → juin
 // Ex: 2026-04-20 → FY 2025-2026 (juillet 2025 à juin 2026)
@@ -215,9 +225,9 @@ export default function DashboardPage() {
   const revFilteredProjects = useMemo(() => {
     const wonProjects = projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status))
     if (revPeriod === "all") return wonProjects
-    if (revPeriod === "month") return wonProjects.filter(p => dossierFromDate(p.startDate) === currentDossier)
-    if (revPeriod === "quarter") return wonProjects.filter(p => { const k = dossierFromDate(p.startDate); return k >= fq.startCode && k <= fq.endCode })
-    return wonProjects.filter(p => dossierInFiscalYear(dossierFromDate(p.startDate), fyStartYear))
+    if (revPeriod === "month") return wonProjects.filter(p => dossierFromDate(getRevenueDateISO(p)) === currentDossier)
+    if (revPeriod === "quarter") return wonProjects.filter(p => { const k = dossierFromDate(getRevenueDateISO(p)); return k >= fq.startCode && k <= fq.endCode })
+    return wonProjects.filter(p => dossierInFiscalYear(dossierFromDate(getRevenueDateISO(p)), fyStartYear))
   }, [projects, revPeriod, currentDossier, fq, fyStartYear])
 
   const depTotal = useMemo(() => depFiltered.reduce((s, d) => s + d.montantMUR, 0), [depFiltered])
@@ -241,6 +251,21 @@ export default function DashboardPage() {
   // Salaires : début = mars 2026 ("2603")
   const SALAIRE_START_CODE = "2603"
   const salaireMensuel = useMemo(() => employees.reduce((s, e) => s + (e.cje || 0) * 220 / 12, 0), [employees])
+
+  // Dépenses récurrentes critiques : montant mensuel à projeter dans le futur
+  // Déduplication par (fournisseur + description + catégorie), on prend la dernière occurrence
+  const recurringCriticalMensuel = useMemo(() => {
+    const uniq: Record<string, { key: string; date: string; montantMUR: number }> = {}
+    depenses.filter(d => d.recurringCritical).forEach(d => {
+      const key = [d.fournisseur || "", d.description || "", d.categorie || ""].map(s => s.trim().toLowerCase()).join("|")
+      const cur = uniq[key]
+      // Garde la plus récente
+      if (!cur || (d.date || "") > cur.date) {
+        uniq[key] = { key, date: d.date || "", montantMUR: d.montantMUR || 0 }
+      }
+    })
+    return Object.values(uniq).reduce((s, v) => s + v.montantMUR, 0)
+  }, [depenses])
 
   // Nombre de mois "salariés" (>= 2603 et <= currentDossier) inclus dans une période
   const computeSalariedMonths = useCallback((period: "all" | "year" | "quarter" | "month"): number => {
@@ -308,7 +333,8 @@ export default function DashboardPage() {
   const revParMois = useMemo(() => {
     const revMap: Record<string, number> = {}
     projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => {
-      if (!p.startDate) return; const d = new Date(p.startDate); const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`; revMap[k] = (revMap[k] || 0) + getRevenueMUR(p)
+      const iso = getRevenueDateISO(p)
+      if (!iso) return; const d = new Date(iso); const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`; revMap[k] = (revMap[k] || 0) + getRevenueMUR(p)
     })
     const depMap: Record<string, number> = {}
     depenses.forEach(d => { if (d.dossier) depMap[d.dossier] = (depMap[d.dossier] || 0) + d.montantMUR })
@@ -322,8 +348,9 @@ export default function DashboardPage() {
     const byMois: Record<string, Record<string, number>> = {}
     const typesSet = new Set<string>()
     projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status) && getRevenueRaw(p) > 0).forEach(p => {
-      if (!p.startDate) return
-      const d = new Date(p.startDate)
+      const iso = getRevenueDateISO(p)
+      if (!iso) return
+      const d = new Date(iso)
       const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
       const type = p.type || "N/A"
       if (type === "Internal" || type === "N/A") return
@@ -337,8 +364,9 @@ export default function DashboardPage() {
     const allMonths = new Set<string>(Object.keys(byMois))
     depenses.forEach(d => { if (d.dossier) allMonths.add(d.dossier) })
     projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => {
-      if (!p.startDate) return
-      const d = new Date(p.startDate)
+      const iso = getRevenueDateISO(p)
+      if (!iso) return
+      const d = new Date(iso)
       allMonths.add(`${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`)
     })
     // Construire la plage continue entre min et max pour inclure aussi les mois vides
@@ -376,14 +404,15 @@ export default function DashboardPage() {
   const ventesListByMois = useMemo(() => {
     const m: Record<string, Project[]> = {}
     projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status) && getRevenueRaw(p) > 0).forEach(p => {
-      if (!p.startDate) return
-      const d = new Date(p.startDate)
+      const iso = getRevenueDateISO(p)
+      if (!iso) return
+      const d = new Date(iso)
       const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
       if (!m[k]) m[k] = []
       m[k].push(p)
     })
     // Trier chaque mois par montant décroissant (en MUR)
-    Object.keys(m).forEach(k => m[k].sort((a, b) => toMUR(b.finalAmount, b.currency) - toMUR(a.finalAmount, a.currency)))
+    Object.keys(m).forEach(k => m[k].sort((a, b) => getRevenueMUR(b) - getRevenueMUR(a)))
     return m
   }, [projects])
 
@@ -468,8 +497,9 @@ export default function DashboardPage() {
     depenses.forEach(d => { if (d.dossier) dM[d.dossier] = (dM[d.dossier] || 0) + d.montantMUR })
     const rM: Record<string, number> = {}
     projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => {
-      if (!p.startDate) return
-      const d = new Date(p.startDate)
+      const iso = getRevenueDateISO(p)
+      if (!iso) return
+      const d = new Date(iso)
       const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
       rM[k] = (rM[k] || 0) + getRevenueMUR(p)
     })
@@ -531,7 +561,8 @@ export default function DashboardPage() {
       const dep = dM[m] || 0
       const sal = m >= SALAIRE_START_CODE ? salaireMensuel : 0
       const revVal = isFuture ? 0 : rev
-      const depVal = isFuture ? 0 : dep
+      // Futur : dépenses = somme des Recurring Critical projetés (sans doublons)
+      const depVal = isFuture ? recurringCriticalMensuel : dep
       // Past : valeurs pour m <= curCode (y compris le mois courant)
       // Future : valeurs pour m >= curCode (y compris le mois courant) → point partagé pour lisser la transition
       const inPast = m <= curCode
@@ -556,17 +587,77 @@ export default function DashboardPage() {
         salairesFuture: inFuture ? sal : null,
       } as any
     })
-  }, [depenses, projects, heroMode, heroPast, heroFuture, heroCustomStart, heroCustomEnd, currentDossier, fyStartYear, salaireMensuel])
+  }, [depenses, projects, heroMode, heroPast, heroFuture, heroCustomStart, heroCustomEnd, currentDossier, fyStartYear, salaireMensuel, recurringCriticalMensuel])
   const heroTotalDep = useMemo(() => heroData.filter(d => !d.isFuture).reduce((s, d) => s + (d.depenses || 0), 0), [heroData])
   const heroTotalRev = useMemo(() => heroData.filter(d => !d.isFuture).reduce((s, d) => s + (d.revenus || 0), 0), [heroData])
   const heroTotalSal = useMemo(() => heroData.filter(d => !d.isFuture).reduce((s, d) => s + (d.salaires || 0), 0), [heroData])
   const heroNet = heroTotalRev - heroTotalDep - heroTotalSal
 
   // Table data — all items (no limit), with filters
+  // Tri basé sur End Date (mois du revenu)
   const allVentes = useMemo(() =>
     projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status) && getRevenueRaw(p) > 0)
-      .sort((a, b) => (b.startDate || "").localeCompare(a.startDate || ""))
+      .sort((a, b) => (getRevenueDateISO(b) || "").localeCompare(getRevenueDateISO(a) || ""))
   , [projects])
+
+  // ── Database Review Critical — santé des fiches projets ─────────
+  // Pour chaque projet, on vérifie si les champs essentiels sont remplis.
+  // Health = % de champs remplis sur la liste attendue.
+  const PROJECT_REQUIRED_FIELDS: Array<{ key: string; label: string; check: (p: Project) => boolean }> = [
+    { key: "name", label: "Name", check: p => !!p.name },
+    { key: "status", label: "Status", check: p => !!p.status },
+    { key: "type", label: "Type", check: p => !!p.type },
+    { key: "currency", label: "Currency", check: p => !!p.currency },
+    { key: "quotedAmount", label: "Quoted Amount", check: p => p.quotedAmount > 0 },
+    { key: "winPercent", label: "Win %", check: p => p.winPercent > 0 },
+    { key: "riskLevel", label: "Risk Level", check: p => !!p.riskLevel },
+    { key: "clientName", label: "Client", check: p => !!p.clientName && p.clientName !== "N/A" },
+    { key: "startDate", label: "Start Date", check: p => !!p.startDate },
+    { key: "endDate", label: "End Date", check: p => !!p.endDate },
+    { key: "methodology", label: "Methodology", check: p => !!p.methodology },
+  ]
+  // Pour projets Won/Completed → on exige en plus Final Amount
+  const PROJECT_REQUIRED_WON: Array<{ key: string; label: string; check: (p: Project) => boolean }> = [
+    { key: "finalAmount", label: "Final Amount", check: p => p.finalAmount > 0 },
+  ]
+
+  const projectsHealth = useMemo(() => {
+    return projects.map(p => {
+      const checks = [...PROJECT_REQUIRED_FIELDS]
+      if (["Won", "Completed", "Won orally"].includes(p.status)) checks.push(...PROJECT_REQUIRED_WON)
+      const missing: string[] = []
+      let ok = 0
+      for (const f of checks) {
+        if (f.check(p)) ok++
+        else missing.push(f.label)
+      }
+      const total = checks.length
+      const pct = total > 0 ? Math.round((ok / total) * 100) : 0
+      return { project: p, health: pct, missing, total, ok }
+    })
+  }, [projects])
+
+  const healthStats = useMemo(() => {
+    const total = projectsHealth.length
+    const healthy = projectsHealth.filter(h => h.health === 100).length
+    const partial = projectsHealth.filter(h => h.health >= 60 && h.health < 100).length
+    const critical = projectsHealth.filter(h => h.health < 60).length
+    const avgHealth = total > 0 ? Math.round(projectsHealth.reduce((s, h) => s + h.health, 0) / total) : 0
+    const missingFieldCounts: Record<string, number> = {}
+    projectsHealth.forEach(h => h.missing.forEach(f => { missingFieldCounts[f] = (missingFieldCounts[f] || 0) + 1 }))
+    const topMissing = Object.entries(missingFieldCounts).sort((a, b) => b[1] - a[1]).slice(0, 5)
+    return { total, healthy, partial, critical, avgHealth, topMissing }
+  }, [projectsHealth])
+
+  const [healthFilter, setHealthFilter] = useState<"all" | "partial" | "critical">("critical")
+  const filteredHealth = useMemo(() => {
+    const list = healthFilter === "all"
+      ? projectsHealth
+      : healthFilter === "partial"
+        ? projectsHealth.filter(h => h.health >= 60 && h.health < 100)
+        : projectsHealth.filter(h => h.health < 60)
+    return [...list].sort((a, b) => a.health - b.health)
+  }, [projectsHealth, healthFilter])
 
   // ── Cash / Commissions ────────────────────────────────────────
   // Règle : si "Ad-hoc commissions 1 ? (eg training services)" est rempli,
@@ -614,10 +705,12 @@ export default function DashboardPage() {
   }, [projects])
 
   // Mois disponibles (décroissant) pour le filtre Date des Dernières ventes — format "YYYY-MM"
+  // Basé sur End Date (= mois du revenu)
   const ventesMonthOptions = useMemo(() => {
     const s = new Set<string>()
     allVentes.forEach(p => {
-      if (p.startDate && p.startDate.length >= 7) s.add(p.startDate.slice(0, 7))
+      const iso = getRevenueDateISO(p)
+      if (iso && iso.length >= 7) s.add(iso.slice(0, 7))
     })
     return [...s].sort().reverse()
   }, [allVentes])
@@ -639,7 +732,7 @@ export default function DashboardPage() {
 
   const filteredVentes = useMemo(() => {
     return allVentes.filter(p => {
-      if (venteFilters.date && !p.startDate?.includes(venteFilters.date)) return false
+      if (venteFilters.date && !getRevenueDateISO(p).includes(venteFilters.date)) return false
       if (venteFilters.projet && !p.name.toLowerCase().includes(venteFilters.projet.toLowerCase())) return false
       if (venteFilters.client && !p.clientName.toLowerCase().includes(venteFilters.client.toLowerCase())) return false
       if (venteFilters.type && p.type !== venteFilters.type) return false
@@ -1107,10 +1200,10 @@ export default function DashboardPage() {
               renderExpanded={() => {
                 const filterMois = pinnedRevMois || revFsFilterMois
                 const wonProjects = projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status) && getRevenueRaw(p) > 0)
-                const allVentesMonths = [...new Set(wonProjects.map(p => dossierFromDate(p.startDate)).filter(Boolean))].sort().reverse()
-                const listItems = (filterMois ? wonProjects.filter(p => dossierFromDate(p.startDate) === filterMois) : wonProjects)
+                const allVentesMonths = [...new Set(wonProjects.map(p => dossierFromDate(getRevenueDateISO(p))).filter(Boolean))].sort().reverse()
+                const listItems = (filterMois ? wonProjects.filter(p => dossierFromDate(getRevenueDateISO(p)) === filterMois) : wonProjects)
                   .slice()
-                  .sort((a, b) => (b.startDate || "").localeCompare(a.startDate || ""))
+                  .sort((a, b) => (getRevenueDateISO(b) || "").localeCompare(getRevenueDateISO(a) || ""))
                 const listTotal = listItems.reduce((s, p) => s + getRevenueMUR(p), 0)
                 return (
                   <div style={{ display: "flex", flexDirection: "column", gap: 16, height: "100%", width: "100%", minHeight: 0 }}>
@@ -1227,7 +1320,7 @@ export default function DashboardPage() {
                               const c = (p.type && projectTypeColors[p.type]) || "#A6C9CE"
                               return (
                                 <tr key={p.id || i} onClick={() => setEditProject(p)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                                  <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{p.startDate || "—"}</td>
+                                  <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{getRevenueDateISO(p) || "—"}</td>
                                   <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</td>
                                   <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName}</td>
                                   <td style={tdStyle}>
@@ -1509,7 +1602,7 @@ export default function DashboardPage() {
                   </thead>
                   <tbody>{filteredVentes.map((p, i) => (
                     <tr key={p.id || i} onClick={() => setEditProject(p)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{p.startDate || "—"}</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{getRevenueDateISO(p) || "—"}</td>
                       <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</td>
                       <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName}</td>
                       <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace" }}>{Math.round(getRevenueRaw(p)).toLocaleString("fr-FR")} {p.currency}</td>
@@ -1602,6 +1695,130 @@ export default function DashboardPage() {
                 Aucune commission enregistrée sur les projets. Les champs `Commission %` et `Commissionnaire` de la DB Projects sont lus automatiquement s'ils existent.
               </div>
             )}
+          </div>
+
+          {/* ── Database Review Critical ── */}
+          <div style={{ ...card, marginTop: 24, padding: 0, overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
+              <div>
+                <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>🩺 Database Review Critical</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>Santé des fiches projets dans Notion · clic pour compléter</div>
+              </div>
+              <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{healthStats.total} projet(s) analysé(s)</div>
+            </div>
+
+            {/* KPIs Health */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 0 }}>
+              <div style={{ padding: "18px 20px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>Santé moyenne</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 6 }}>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: healthStats.avgHealth >= 80 ? "#22c55e" : healthStats.avgHealth >= 60 ? "#facc15" : "#ef4444", fontFamily: "monospace" }}>{healthStats.avgHealth}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>%</span>
+                </div>
+                <div style={{ height: 6, background: "rgba(166,201,206,0.1)", borderRadius: 3, marginTop: 8, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${healthStats.avgHealth}%`, background: healthStats.avgHealth >= 80 ? "#22c55e" : healthStats.avgHealth >= 60 ? "#facc15" : "#ef4444", transition: "width 0.3s" }} />
+                </div>
+              </div>
+              <div style={{ padding: "18px 20px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>✓ Complets (100%)</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: "#22c55e", fontFamily: "monospace", marginTop: 6 }}>{healthStats.healthy}</div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
+                  {healthStats.total > 0 ? Math.round((healthStats.healthy / healthStats.total) * 100) : 0} % des projets
+                </div>
+              </div>
+              <div style={{ padding: "18px 20px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>⚠ Partiels (60-99%)</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: "#facc15", fontFamily: "monospace", marginTop: 6 }}>{healthStats.partial}</div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
+                  {healthStats.total > 0 ? Math.round((healthStats.partial / healthStats.total) * 100) : 0} % des projets
+                </div>
+              </div>
+              <div style={{ padding: "18px 20px" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>✕ Critiques (&lt; 60%)</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: "#ef4444", fontFamily: "monospace", marginTop: 6 }}>{healthStats.critical}</div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
+                  {healthStats.total > 0 ? Math.round((healthStats.critical / healthStats.total) * 100) : 0} % des projets
+                </div>
+              </div>
+            </div>
+
+            {/* Top champs manquants */}
+            {healthStats.topMissing.length > 0 && (
+              <div style={{ padding: "12px 24px", borderTop: "1px solid rgba(166,201,206,0.08)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Top champs manquants :</div>
+                {healthStats.topMissing.map(([field, count]) => (
+                  <span key={field} style={{ fontSize: "var(--fs-2xs)", color: "var(--text-primary)", background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", padding: "2px 8px", borderRadius: 4, fontWeight: 600 }}>
+                    {field} <span style={{ color: "var(--text-muted)", fontFamily: "monospace", marginLeft: 4 }}>× {count}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Filtre + listing */}
+            <div style={{ borderTop: "1px solid rgba(166,201,206,0.12)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 24px", flexWrap: "wrap", gap: 12 }}>
+                <div style={{ fontSize: "var(--fs-sm)", fontWeight: 600, color: "var(--text-primary)" }}>
+                  {filteredHealth.length} projet(s) à compléter
+                </div>
+                <Seg
+                  value={healthFilter}
+                  onChange={v => setHealthFilter(v as any)}
+                  options={[["critical", "Critiques < 60%"], ["partial", "Partiels"], ["all", "Tous"]]}
+                />
+              </div>
+              {filteredHealth.length === 0 ? (
+                <div style={{ textAlign: "center", padding: 40, color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontStyle: "italic" }}>
+                  🎉 Aucun projet dans cette catégorie
+                </div>
+              ) : (
+                <div style={{ maxHeight: 500, overflowY: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+                    <thead style={{ position: "sticky", top: 0, background: "var(--bg-panel)", zIndex: 2 }}>
+                      <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                        <th style={{ ...thStyle, width: 80 }}>Santé</th>
+                        <th style={thStyle}>Projet</th>
+                        <th style={thStyle}>Client</th>
+                        <th style={thStyle}>Status</th>
+                        <th style={thStyle}>Champs manquants</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredHealth.map(({ project: p, health, missing }, i) => {
+                        const color = health >= 80 ? "#22c55e" : health >= 60 ? "#facc15" : "#ef4444"
+                        return (
+                          <tr
+                            key={p.id || i}
+                            onClick={() => setEditProject(p)}
+                            style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }}
+                            onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")}
+                            onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                          >
+                            <td style={tdStyle}>
+                              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                <span style={{ fontFamily: "monospace", fontWeight: 700, color, minWidth: 36 }}>{health}%</span>
+                                <div style={{ flex: 1, height: 4, background: "rgba(166,201,206,0.1)", borderRadius: 2, overflow: "hidden", minWidth: 24 }}>
+                                  <div style={{ height: "100%", width: `${health}%`, background: color }} />
+                                </div>
+                              </div>
+                            </td>
+                            <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name || <em style={{ color: "var(--color-error)" }}>(sans nom)</em>}</td>
+                            <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName || "—"}</td>
+                            <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status || "—"}</td>
+                            <td style={tdStyle}>
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                                {missing.map(f => (
+                                  <span key={f} style={{ fontSize: "var(--fs-2xs)", background: "rgba(239,68,68,0.15)", color: "#ef4444", padding: "1px 6px", borderRadius: 3, fontWeight: 600 }}>{f}</span>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
 
           <div style={{ textAlign: "center", padding: "12px 0 24px", color: "var(--text-muted)", fontSize: "var(--fs-2xs)" }}>{projects.length} projets · {depenses.length} dépenses · {employees.length} employés · Données Notion en temps réel</div>
@@ -2474,7 +2691,7 @@ function TopItemDetailModal({ mode, name, projects, depenses, depCategoryColors,
                 <tbody>
                   {sortedP.map((p, i) => (
                     <tr key={p.id || i} onClick={() => onSelectProject(p)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{p.startDate || "—"}</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{getRevenueDateISO(p) || "—"}</td>
                       <td style={{ ...tdStyle, fontWeight: 500 }}>{p.name}</td>
                       <td style={tdStyle}>{p.type ? (() => { const c = projectTypeColors[p.type] || "#A6C9CE"; return <span style={{ background: `${c}22`, color: c, padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{p.type}</span> })() : "—"}</td>
                       <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status}</td>
@@ -2557,7 +2774,7 @@ function RevenueDetailModal({ moisCode, ventes, projectTypeColors, onClose, onSe
               <tbody>
                 {sorted.map((p, i) => (
                   <tr key={p.id || i} onClick={() => onSelectProject(p)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
-                    <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{p.startDate || "—"}</td>
+                    <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{getRevenueDateISO(p) || "—"}</td>
                     <td style={{ ...tdStyle, fontWeight: 500 }}>{p.name}</td>
                     <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName}</td>
                     <td style={tdStyle}>{p.type ? (() => { const c = projectTypeColors[p.type] || "#A6C9CE"; return <span style={{ background: `${c}22`, color: c, padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{p.type}</span> })() : "—"}</td>
@@ -2609,7 +2826,7 @@ function HeroTooltip({ active, payload, label }: any) {
       </div>
       <TRow c="#A6C9CE" l="Revenus" v={Math.round(rev).toLocaleString("fr-FR")} vc="#A6C9CE" />
       <TRow c="#ef4444" l="Dépenses" v={Math.round(dep).toLocaleString("fr-FR")} vc="#ef4444" />
-      {sal > 0 && <TRow c="#f97316" l="Salaires" v={Math.round(sal).toLocaleString("fr-FR")} vc="#f97316" />}
+      <TRow c="#f97316" l="Salaires" v={Math.round(sal).toLocaleString("fr-FR")} vc="#f97316" />
       {net != null && (
         <div style={{ borderTop: "1px solid rgba(166,201,206,0.10)", paddingTop: 6, marginTop: 6 }}>
           <TRow c={net >= 0 ? "#22c55e" : "#ef4444"} l="Net" v={`${net >= 0 ? "+" : ""}${Math.round(net).toLocaleString("fr-FR")}`} vc={net >= 0 ? "#22c55e" : "#ef4444"} bold />

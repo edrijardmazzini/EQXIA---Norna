@@ -171,6 +171,9 @@ export async function GET() {
       const payeParIds = getRelationIds(props["Payé par"])
       const payeParName = payeParIds.length > 0 ? (employeesMap[payeParIds[0]] || "Inconnu") : "Non attribué"
 
+      // Recurring Critical (checkbox) — dépenses à projeter dans le futur
+      const rcProp = props["Recurring Critical"] || props["Récurrent critique"] || props["Critical Recurring"]
+      const recurringCritical = rcProp?.type === "checkbox" ? !!rcProp.checkbox : !!(rcProp?.checkbox ?? false)
       return {
         id: d.id,
         description: getText(props["Description"]),
@@ -183,6 +186,7 @@ export async function GET() {
         devise: getSelect(props["Devise"]),
         dossier: getText(props["Dossier"]),
         payePar: payeParName,
+        recurringCritical,
       }
     })
 
