@@ -97,18 +97,47 @@ export async function GET() {
       }
     }
 
-    // Build employees lookup
+    // Build employees lookup + structured list (CJE, dates)
     const employeesMap: Record<string, string> = {}
+    const employees: Array<{ id: string; name: string; cje: number; startDate: string; endDate: string; role: string }> = []
     for (const e of employeesRaw) {
-      const titleProp = Object.values(e.properties as Record<string, any>).find((p: any) => p.type === "title")
-      if (titleProp?.title?.length > 0) {
-        employeesMap[e.id] = titleProp.title.map((t: any) => t.plain_text).join("").trim()
+      const props = e.properties as Record<string, any>
+      const titleProp = Object.values(props).find((p: any) => p.type === "title") as any
+      const name = titleProp?.title?.length > 0 ? titleProp.title.map((t: any) => t.plain_text).join("").trim() : ""
+      if (name) employeesMap[e.id] = name
+      // Coût Journalier Entreprise (peut être formule ou number)
+      let cje = 0
+      const cjeProp = props["Coût Journalier Entreprise"] || props["Coût journalier entreprise"] || props["CJE"] || props["Cout Journalier Entreprise"]
+      if (cjeProp) {
+        if (cjeProp.type === "number") cje = cjeProp.number ?? 0
+        else if (cjeProp.type === "formula") cje = getFormula(cjeProp) ?? 0
       }
+      const startDate = getDate(props["Date d'entrée"] || props["Start Date"] || props["Date début"] || {})
+      const endDate = getDate(props["Date de sortie"] || props["End Date"] || props["Date fin"] || {})
+      const role = getSelect(props["Role"] || props["Rôle"] || {}) || getText(props["Role"] || props["Rôle"] || {})
+      employees.push({ id: e.id, name, cje, startDate, endDate, role })
     }
 
     // Parse projects
     const projects = projectsRaw.map((p: any) => {
       const props = p.properties
+      // Commission : % et bénéficiaire (relation → employees, ou texte/select)
+      let commissionPercent = 0
+      const comPctProp = props["Commission %"] || props["Commission"] || props["% Commission"]
+      if (comPctProp) {
+        if (comPctProp.type === "number") commissionPercent = comPctProp.number ?? 0
+        else if (comPctProp.type === "formula") commissionPercent = getFormula(comPctProp) ?? 0
+      }
+      let commissionTo = ""
+      const comToProp = props["Commissionnaire"] || props["Commission à"] || props["Commission to"] || props["Bénéficiaire commission"]
+      if (comToProp) {
+        if (comToProp.type === "relation") {
+          const ids = getRelationIds(comToProp)
+          commissionTo = ids.map(id => employeesMap[id] || clientsMap[id] || "Inconnu").join(", ")
+        } else if (comToProp.type === "select") commissionTo = getSelect(comToProp)
+        else if (comToProp.type === "people") commissionTo = (comToProp.people || []).map((u: any) => u.name).join(", ")
+        else if (comToProp.type === "rich_text" || comToProp.type === "title") commissionTo = getText(comToProp)
+      }
       return {
         id: p.id,
         name: getText(props["Name"]),
@@ -128,6 +157,8 @@ export async function GET() {
         humanCost: getFormula(props["Human Internal Cost of project"]),
         clientIds: getRelationIds(props["Client"]),
         clientName: getRelationIds(props["Client"]).map(id => clientsMap[id] || "Inconnu").join(", ") || "N/A",
+        commissionPercent,
+        commissionTo,
       }
     })
 
@@ -152,7 +183,7 @@ export async function GET() {
       }
     })
 
-    return NextResponse.json({ projects, depenses })
+    return NextResponse.json({ projects, depenses, employees })
   } catch (error: any) {
     console.error("Dashboard fetch error:", error)
     return NextResponse.json({ error: error.message }, { status: 500 })
