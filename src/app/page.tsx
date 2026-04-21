@@ -416,12 +416,41 @@ export default function DashboardPage() {
     return Object.entries(m).sort((a, b) => b[1] - a[1]).map(([name]) => name)
   }, [depenses])
 
-  // Toujours calculé sur TOUTES les dépenses (ne dépend PAS de kpiPeriod)
+  // Sync avec la range du chart "Charges mensuelles" (depView)
+  // En passé → somme réels dans la plage. En futur → somme projetées (recurring critical × nb mois).
+  // En mélange (ex: custom couvrant past + future) → somme des deux avec détail.
   const depParCat = useMemo(() => {
     const m: Record<string, number> = {}
-    depenses.forEach(d => { if (d.categorie) m[d.categorie] = (m[d.categorie] || 0) + d.montantMUR })
-    return Object.entries(m).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
-  }, [depenses])
+    let projectedAmount = 0
+    let monthsPast = 0, monthsFuture = 0
+    const existing = [...new Set(depenses.map(d => d.dossier).filter(Boolean))]
+    const codes = buildMonthCodes(depViewMode, depViewPast, depViewFuture, depViewCustomStart, depViewCustomEnd, existing)
+    for (const code of codes) {
+      if (code > currentDossier) {
+        // Futur : on injecte les dépenses récurrentes critiques comme une pseudo-catégorie "Récurrent critique"
+        monthsFuture++
+        projectedAmount += recurringCriticalMensuel
+      } else {
+        monthsPast++
+        depenses.filter(d => d.dossier === code).forEach(d => {
+          if (d.categorie) m[d.categorie] = (m[d.categorie] || 0) + d.montantMUR
+        })
+      }
+    }
+    const out = Object.entries(m).map(([name, value]) => ({ name, value, projected: 0 }))
+    if (projectedAmount > 0) {
+      out.push({ name: "Récurrent critique (projeté)", value: projectedAmount, projected: 1 })
+    }
+    return out.sort((a, b) => b.value - a.value)
+  }, [depenses, depViewMode, depViewPast, depViewFuture, depViewCustomStart, depViewCustomEnd, currentDossier, recurringCriticalMensuel, buildMonthCodes])
+  // Méta : indique si la plage couvre du futur, pour afficher une note dans le pie
+  const depParCatMeta = useMemo(() => {
+    const existing = [...new Set(depenses.map(d => d.dossier).filter(Boolean))]
+    const codes = buildMonthCodes(depViewMode, depViewPast, depViewFuture, depViewCustomStart, depViewCustomEnd, existing)
+    const nbFuture = codes.filter(c => c > currentDossier).length
+    const nbPast = codes.filter(c => c <= currentDossier).length
+    return { nbFuture, nbPast, total: codes.length }
+  }, [depenses, depViewMode, depViewPast, depViewFuture, depViewCustomStart, depViewCustomEnd, currentDossier, buildMonthCodes])
 
   // Couleur par catégorie — mapping stable basé sur le pie "Dépenses par catégorie"
   // Tons de bleu/teal (PIE_CAT), dans l'ordre décroissant des montants
@@ -537,13 +566,52 @@ export default function DashboardPage() {
     return m
   }, [projects])
 
+  // Sync avec la range du chart "Revenus mensuels" (revView)
   const projParTypeFiltered = useMemo(() => {
-    const m: Record<string, { count: number; amount: number }> = {}
-    projects.filter(p => !["Lost", "Cancelled"].includes(p.status)).forEach(p => {
-      const t = p.type || "N/A"; if (!m[t]) m[t] = { count: 0, amount: 0 }; m[t].count++; m[t].amount += getRevenueMUR(p)
+    const m: Record<string, { count: number; amount: number; amountProjected: number; countProjected: number }> = {}
+    // On ne filtre plus Lost/Cancelled pour le pie car le user pilote par plage (même Lost peut compter si demandé)
+    // Mais on garde l'exclusion Internal / N/A
+    const rangedProjects = projects.filter(p => {
+      const t = p.type || "N/A"
+      if (t === "Internal" || t === "N/A") return false
+      const iso = getRevenueDateISO(p)
+      if (!iso) return false
+      const d = new Date(iso)
+      const code = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+      // Construire la plage filled pour savoir si le code est inclus
+      return revChartRange.filled.includes(code)
     })
-    return Object.entries(m).filter(([n]) => n !== "Internal" && n !== "N/A").map(([name, v]) => ({ name, ...v })).sort((a, b) => b.amount - a.amount)
-  }, [projects])
+    rangedProjects.forEach(p => {
+      const t = p.type || "N/A"
+      if (!m[t]) m[t] = { count: 0, amount: 0, amountProjected: 0, countProjected: 0 }
+      const iso = getRevenueDateISO(p)
+      const d = new Date(iso)
+      const code = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+      const isFuture = code > currentDossier
+      const amt = getRevenueMUR(p)
+      if (isFuture) {
+        m[t].amountProjected += amt
+        m[t].countProjected++
+      } else {
+        m[t].amount += amt
+        m[t].count++
+      }
+    })
+    return Object.entries(m).map(([name, v]) => ({
+      name,
+      count: v.count + v.countProjected,
+      amount: v.amount + v.amountProjected,
+      realAmount: v.amount,
+      projectedAmount: v.amountProjected,
+      realCount: v.count,
+      projectedCount: v.countProjected,
+    })).sort((a, b) => b.amount - a.amount)
+  }, [projects, revChartRange, currentDossier])
+  const projParTypeMeta = useMemo(() => {
+    const nbFuture = revChartRange.filled.filter(c => c > currentDossier).length
+    const nbPast = revChartRange.filled.filter(c => c <= currentDossier).length
+    return { nbFuture, nbPast, total: revChartRange.filled.length }
+  }, [revChartRange, currentDossier])
 
   const allFourn = useMemo(() => {
     // Pour chaque fournisseur: total + catégorie dominante (max en MUR) + nb de dépenses
@@ -624,13 +692,17 @@ export default function DashboardPage() {
   const heroData = useMemo(() => {
     const dM: Record<string, number> = {}
     depenses.forEach(d => { if (d.dossier) dM[d.dossier] = (dM[d.dossier] || 0) + d.montantMUR })
-    const rM: Record<string, number> = {}
-    projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).forEach(p => {
+    // Maps séparés pour CA (= Final ou Quoted×Win) et Revenu net (= CA × (1 - commission))
+    const rMNet: Record<string, number> = {}
+    const rMCa: Record<string, number> = {}
+    // Inclut TOUS les projets (pas seulement Won) pour que le futur / pipeline apparaisse
+    projects.forEach(p => {
       const iso = getRevenueDateISO(p)
       if (!iso) return
       const d = new Date(iso)
       const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
-      rM[k] = (rM[k] || 0) + getRevenueMUR(p)
+      rMNet[k] = (rMNet[k] || 0) + getRevenueMUR(p)
+      rMCa[k] = (rMCa[k] || 0) + getCAMUR(p)
     })
 
     const curCode = currentDossier // ex "2604"
@@ -649,7 +721,7 @@ export default function DashboardPage() {
 
     if (heroMode === "past") {
       // Historique : tous les mois existants (rev ou dep), puis slice selon heroPast
-      const allPast = new Set<string>([...Object.keys(dM), ...Object.keys(rM)])
+      const allPast = new Set<string>([...Object.keys(dM), ...Object.keys(rMNet), ...Object.keys(rMCa)])
       let sorted = [...allPast].sort()
       // S'assurer qu'on ne dépasse pas current
       sorted = sorted.filter(c => c <= curCode)
@@ -686,41 +758,56 @@ export default function DashboardPage() {
     return codes.map(m => {
       const isFuture = m > curCode
       const isCurrent = m === curCode
-      const rev = rM[m] || 0
+      const revNet = rMNet[m] || 0
+      const ca = rMCa[m] || 0
+      const commission = Math.max(0, ca - revNet)
       const dep = dM[m] || 0
       const sal = m >= SALAIRE_START_CODE ? salaireMensuel : 0
-      const revVal = isFuture ? 0 : rev
       // Futur : dépenses = somme des Recurring Critical projetés (sans doublons)
       const depVal = isFuture ? recurringCriticalMensuel : dep
-      // Past : valeurs pour m <= curCode (y compris le mois courant)
-      // Future : valeurs pour m >= curCode (y compris le mois courant) → point partagé pour lisser la transition
-      const inPast = m <= curCode
-      const inFuture = m >= curCode
+      // EBITDA = Revenu net − Dépenses − Salaires (valide past et projeté)
+      const ebitda = revNet - depVal - sal
       return {
         mois: m,
         label: fmtDossier(m),
         isFuture,
         isCurrent,
-        // Agrégés (pour tooltip + totaux)
-        depenses: depVal,
-        revenus: revVal,
-        salaires: sal,
-        // Net : seulement sur le passé
-        net: isFuture ? null : (rev - dep - sal),
-        // Split passé/futur — le mois courant appartient aux DEUX pour connecter visuellement
-        depensesPast: inPast ? depVal : null,
-        depensesFuture: inFuture ? depVal : null,
-        revenusPast: inPast ? revVal : null,
-        revenusFuture: inFuture ? revVal : null,
-        salairesPast: inPast ? sal : null,
-        salairesFuture: inFuture ? sal : null,
+        // Agrégés (tooltip)
+        ca, revenus: revNet, commission, depenses: depVal, salaires: sal, ebitda,
+        // ── Passé (séries pleines) ──
+        caPast: isFuture ? null : ca,
+        revenuPast: isFuture ? null : revNet,
+        commissionPast: isFuture ? null : commission,
+        depensesPast: isFuture ? null : depVal,
+        salairesPast: isFuture ? null : sal,
+        ebitdaPast: isFuture ? null : ebitda,
+        // ── Futur / projeté (séries pointillées, couleurs atténuées) ──
+        caProjected: isFuture ? ca : null,
+        revenuProjected: isFuture ? revNet : null,
+        commissionProjected: isFuture ? commission : null,
+        depensesProjected: isFuture ? depVal : null,
+        salairesProjected: isFuture ? sal : null,
+        ebitdaProjected: isFuture ? ebitda : null,
       } as any
     })
   }, [depenses, projects, heroMode, heroPast, heroFuture, heroCustomStart, heroCustomEnd, currentDossier, fyStartYear, salaireMensuel, recurringCriticalMensuel])
   const heroTotalDep = useMemo(() => heroData.filter(d => !d.isFuture).reduce((s, d) => s + (d.depenses || 0), 0), [heroData])
   const heroTotalRev = useMemo(() => heroData.filter(d => !d.isFuture).reduce((s, d) => s + (d.revenus || 0), 0), [heroData])
+  const heroTotalCA = useMemo(() => heroData.filter(d => !d.isFuture).reduce((s, d) => s + (d.ca || 0), 0), [heroData])
   const heroTotalSal = useMemo(() => heroData.filter(d => !d.isFuture).reduce((s, d) => s + (d.salaires || 0), 0), [heroData])
-  const heroNet = heroTotalRev - heroTotalDep - heroTotalSal
+  const heroTotalEbitda = heroTotalRev - heroTotalDep - heroTotalSal
+  const heroProjectedDep = useMemo(() => heroData.filter(d => d.isFuture).reduce((s, d) => s + (d.depenses || 0), 0), [heroData])
+  const heroProjectedRev = useMemo(() => heroData.filter(d => d.isFuture).reduce((s, d) => s + (d.revenus || 0), 0), [heroData])
+  const heroProjectedCA = useMemo(() => heroData.filter(d => d.isFuture).reduce((s, d) => s + (d.ca || 0), 0), [heroData])
+  const heroProjectedSal = useMemo(() => heroData.filter(d => d.isFuture).reduce((s, d) => s + (d.salaires || 0), 0), [heroData])
+  const heroProjectedEbitda = heroProjectedRev - heroProjectedDep - heroProjectedSal
+
+  // Hide/show state pour le Finance Dashboard
+  const [heroHidden, setHeroHidden] = useState<Set<string>>(new Set())
+  const toggleHero = (key: string) => setHeroHidden(prev => {
+    const n = new Set(prev); if (n.has(key)) n.delete(key); else n.add(key); return n
+  })
+  const [heroFullscreen, setHeroFullscreen] = useState(false)
 
   // Table data — all items (no limit), with filters
   // Tri basé sur End Date (mois du revenu)
@@ -1050,82 +1137,20 @@ export default function DashboardPage() {
             <KpiCard icon="⚡" iconBg="rgba(20,184,166,0.15)" iconBorder="rgba(20,184,166,0.3)" label="Projets actifs" value={`${projetsActifs}`} unit={`/ ${projetsTotal}`} sub="Status = Active" />
           </div>
 
-          {/* ── HERO ── */}
-          <div style={{ ...card, padding: 0, marginBottom: 24, overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)", flexWrap: "wrap", gap: 12 }}>
-              <div>
-                <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>Dépenses vs Revenus</div>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>
-                  Dépenses empilées sur salaires · Net = Revenus - Dépenses - Salaires
-                </div>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                <div style={{ display: "flex", gap: 10, fontSize: "var(--fs-xs)", flexWrap: "wrap" }}>
-                  <Badge c="#A6C9CE" l="Revenus" v={Math.round(heroTotalRev).toLocaleString("fr-FR")} />
-                  <Badge c="#ef4444" l="Dépenses" v={Math.round(heroTotalDep).toLocaleString("fr-FR")} />
-                  <Badge c="#f97316" l="Salaires" v={Math.round(salaireMensuel).toLocaleString("fr-FR")} />
-                  <Badge c={heroNet >= 0 ? "#22c55e" : "#ef4444"} l="Net" v={`${heroNet >= 0 ? "+" : ""}${Math.round(heroNet).toLocaleString("fr-FR")}`} />
-                </div>
-              </div>
-            </div>
-
-            {/* Ligne contrôles : Mode + sélecteur secondaire */}
-            <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 24px", borderBottom: "1px solid rgba(166,201,206,0.06)", flexWrap: "wrap" }}>
-              <Seg value={heroMode} onChange={v => setHeroMode(v as any)} options={[["past", "Past"], ["future", "Future"], ["custom", "Custom"]]} />
-              {heroMode === "past" && (
-                <Seg value={heroPast} onChange={v => setHeroPast(v as any)} options={[["all", "All"], ["12m", "12m"], ["6m", "6m"], ["3m", "3m"]]} />
-              )}
-              {heroMode === "future" && (
-                <Seg value={heroFuture} onChange={v => setHeroFuture(v as any)} options={[["12m", "12m"], ["6m", "6m"], ["3m", "3m"]]} />
-              )}
-              {heroMode === "custom" && (
-                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-2xs)" }}>
-                  <label style={{ color: "var(--text-muted)" }}>Du</label>
-                  <input type="month" value={heroCustomStart} onChange={e => setHeroCustomStart(e.target.value)} placeholder={`${fy.start.getFullYear()}-07`} style={{ padding: "3px 6px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit" }} />
-                  <label style={{ color: "var(--text-muted)" }}>au</label>
-                  <input type="month" value={heroCustomEnd} onChange={e => setHeroCustomEnd(e.target.value)} placeholder={`${fy.end.getFullYear()}-06`} style={{ padding: "3px 6px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit" }} />
-                  {(heroCustomStart || heroCustomEnd) && (
-                    <button onClick={() => { setHeroCustomStart(""); setHeroCustomEnd("") }} style={{ background: "none", border: "1px solid var(--border-subtle)", color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "3px 6px", borderRadius: 4, fontFamily: "inherit" }}>
-                      FY défaut
-                    </button>
-                  )}
-                </div>
-              )}
-              {heroMode === "future" && (
-                <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontStyle: "italic" }}>
-                  Projection (pointillés) — les salaires sont supposés constants
-                </span>
-              )}
-            </div>
-
-            <div style={{ padding: "16px 16px 8px" }}>
-              <ResponsiveContainer width="100%" height={340}>
-                <AreaChart data={heroData} margin={{ left: 10, right: 10 }}>
-                  <defs>
-                    <linearGradient id="gDep" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ef4444" stopOpacity={0.30} /><stop offset="95%" stopColor="#ef4444" stopOpacity={0.02} /></linearGradient>
-                    <linearGradient id="gSal" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f97316" stopOpacity={0.35} /><stop offset="95%" stopColor="#f97316" stopOpacity={0.02} /></linearGradient>
-                    <linearGradient id="gRev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#A6C9CE" stopOpacity={0.35} /><stop offset="95%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.06)" />
-                  {/* Trait y=0 plein blanc, derrière les séries */}
-                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.35)" strokeWidth={1} ifOverflow="extendDomain" {...({ isFront: false } as any)} />
-                  <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-                  <Tooltip content={<HeroTooltip />} />
-                  {/* ── PASSÉ : traits pleins, charges empilées (salaires base, dépenses dessus) ── */}
-                  <Area type="monotone" dataKey="salairesPast" stackId="chargesPast" stroke="#f97316" strokeWidth={2} fill="url(#gSal)" dot={false} activeDot={{ r: 4, fill: "#f97316", strokeWidth: 0 }} connectNulls={false} />
-                  <Area type="monotone" dataKey="depensesPast" stackId="chargesPast" stroke="#ef4444" strokeWidth={2} fill="url(#gDep)" dot={false} activeDot={{ r: 4, fill: "#ef4444", strokeWidth: 0 }} connectNulls={false} />
-                  <Area type="monotone" dataKey="revenusPast" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev)" dot={false} activeDot={{ r: 4, fill: "#A6C9CE", strokeWidth: 0 }} connectNulls={false} />
-                  {/* ── FUTUR : traits en pointillés ── */}
-                  <Area type="monotone" dataKey="salairesFuture" stackId="chargesFuture" stroke="#f97316" strokeWidth={2} strokeDasharray="5 4" fill="url(#gSal)" fillOpacity={0.5} dot={false} activeDot={{ r: 4, fill: "#f97316", strokeWidth: 0 }} connectNulls={false} />
-                  <Area type="monotone" dataKey="depensesFuture" stackId="chargesFuture" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 4" fill="url(#gDep)" fillOpacity={0.5} dot={false} activeDot={{ r: 4, fill: "#ef4444", strokeWidth: 0 }} connectNulls={false} />
-                  <Area type="monotone" dataKey="revenusFuture" stroke="#A6C9CE" strokeWidth={2} strokeDasharray="5 4" fill="url(#gRev)" fillOpacity={0.5} dot={false} activeDot={{ r: 4, fill: "#A6C9CE", strokeWidth: 0 }} connectNulls={false} />
-                  {/* ── Net : ligne verte pleine (pas de futur) ── */}
-                  <Line type="monotone" dataKey="net" stroke="#22c55e" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#22c55e", strokeWidth: 0 }} connectNulls={false} />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+          {/* ── Finance Dashboard ── */}
+          <FinanceDashboard
+            heroData={heroData}
+            heroMode={heroMode} setHeroMode={setHeroMode}
+            heroPast={heroPast} setHeroPast={setHeroPast}
+            heroFuture={heroFuture} setHeroFuture={setHeroFuture}
+            heroCustomStart={heroCustomStart} setHeroCustomStart={setHeroCustomStart}
+            heroCustomEnd={heroCustomEnd} setHeroCustomEnd={setHeroCustomEnd}
+            hidden={heroHidden} toggleHidden={toggleHero}
+            fullscreen={heroFullscreen} setFullscreen={setHeroFullscreen}
+            totals={{ ca: heroTotalCA, rev: heroTotalRev, dep: heroTotalDep, sal: heroTotalSal, ebitda: heroTotalEbitda }}
+            projected={{ ca: heroProjectedCA, rev: heroProjectedRev, dep: heroProjectedDep, sal: heroProjectedSal, ebitda: heroProjectedEbitda }}
+            fyLabel={fy.label}
+          />
 
           {/* ── Rows Revenus + Dépenses (ordre vertical : Revenus au-dessus) ── */}
           <div style={{ display: "flex", flexDirection: "column" }}>
@@ -1337,6 +1362,7 @@ export default function DashboardPage() {
 
             <ChartCard
               title="Dépenses par catégorie"
+              sub={depParCatMeta.nbFuture > 0 ? (depParCatMeta.nbPast > 0 ? `Plage : ${depParCatMeta.nbPast} mois passé + ${depParCatMeta.nbFuture} mois projeté` : `Plage : ${depParCatMeta.nbFuture} mois projeté`) : `Plage : ${depParCatMeta.nbPast} mois`}
               expandable
               expandMode="tall"
               renderExpanded={() => (
@@ -1428,7 +1454,7 @@ export default function DashboardPage() {
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
                           <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
                           <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-                          <Tooltip content={<RevenueTooltip ventesListByMois={ventesListByMois} />} />
+                          <Tooltip content={<RevenueTooltip ventesListByMois={{ ...ventesListByMois, __showAll: true } as any} />} />
                           {revMode === "total" ? (
                             <>
                               <Area type="monotone" dataKey="revenusPast" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev2Fs)" dot={{ r: 3, fill: "#A6C9CE", strokeWidth: 0 }} activeDot={{ r: 5, fill: "#A6C9CE", strokeWidth: 0 }} connectNulls={false} />
@@ -1581,6 +1607,7 @@ export default function DashboardPage() {
 
             <ChartCard
               title="Revenus par type de projet"
+              sub={projParTypeMeta.nbFuture > 0 ? (projParTypeMeta.nbPast > 0 ? `Plage : ${projParTypeMeta.nbPast} passé + ${projParTypeMeta.nbFuture} projeté` : `Plage : ${projParTypeMeta.nbFuture} mois projeté`) : `Plage : ${projParTypeMeta.nbPast} mois`}
               expandable
               expandMode="tall"
               renderExpanded={() => (
@@ -3097,6 +3124,157 @@ function Badge({ c, l, v }: { c: string; l: string; v: string }) {
   return <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: c }} /><span style={{ color: "var(--text-muted)" }}>{l}</span><span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "monospace" }}>{v}</span></span>
 }
 
+// ───────── Finance Dashboard (hero) ─────────
+// Séries rendues (identifiants = clés de toggle dans hidden) :
+//  Actuels (pleins) : CA (line), Revenu (area), Dépenses (area stack), Salaires (area stack base), EBITDA (line)
+//  Projetés (pointillés) : identiques mais suffixés "-projected"
+const HERO_SERIES_ACTUAL = [
+  { key: "revenu", label: "Revenu", color: "#A6C9CE", type: "area" },
+  { key: "ca", label: "CA", color: "#3D8899", type: "line" },
+  { key: "depenses", label: "Dépenses", color: "#ef4444", type: "area" },
+  { key: "salaires", label: "Salaires", color: "#f97316", type: "area" },
+  { key: "ebitda", label: "EBITDA", color: "#22c55e", type: "line" },
+] as const
+const HERO_SERIES_PROJECTED = [
+  { key: "revenu-p", label: "Revenu proj.", color: "#A6C9CE", type: "area" },
+  { key: "ca-p", label: "CA proj.", color: "#3D8899", type: "line" },
+  { key: "depenses-p", label: "Dépenses proj.", color: "#ef4444", type: "area" },
+  { key: "salaires-p", label: "Salaires proj.", color: "#f97316", type: "area" },
+  { key: "ebitda-p", label: "EBITDA proj.", color: "#22c55e", type: "line" },
+] as const
+
+function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPast, heroFuture, setHeroFuture, heroCustomStart, setHeroCustomStart, heroCustomEnd, setHeroCustomEnd, hidden, toggleHidden, fullscreen, setFullscreen, totals, projected, fyLabel }: any) {
+  const showSeries = (key: string) => !hidden.has(key)
+
+  const renderChart = (height: number | string) => (
+    <ResponsiveContainer width="100%" height={height as any}>
+      <AreaChart data={heroData} margin={{ left: 10, right: 10 }}>
+        <defs>
+          <linearGradient id="gDep" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ef4444" stopOpacity={0.30} /><stop offset="95%" stopColor="#ef4444" stopOpacity={0.02} /></linearGradient>
+          <linearGradient id="gSal" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f97316" stopOpacity={0.35} /><stop offset="95%" stopColor="#f97316" stopOpacity={0.02} /></linearGradient>
+          <linearGradient id="gRev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#A6C9CE" stopOpacity={0.35} /><stop offset="95%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.06)" />
+        <ReferenceLine y={0} stroke="rgba(255,255,255,0.35)" strokeWidth={1} ifOverflow="extendDomain" {...({ isFront: false } as any)} />
+        <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />
+        <Tooltip content={<HeroTooltip />} />
+        {/* ── PASSÉ (pleines) ── */}
+        {showSeries("salaires") && <Area type="monotone" dataKey="salairesPast" stackId="chargesPast" stroke="#f97316" strokeWidth={2} fill="url(#gSal)" dot={false} activeDot={{ r: 4, fill: "#f97316", strokeWidth: 0 }} connectNulls={false} />}
+        {showSeries("depenses") && <Area type="monotone" dataKey="depensesPast" stackId="chargesPast" stroke="#ef4444" strokeWidth={2} fill="url(#gDep)" dot={false} activeDot={{ r: 4, fill: "#ef4444", strokeWidth: 0 }} connectNulls={false} />}
+        {showSeries("revenu") && <Area type="monotone" dataKey="revenuPast" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRev)" dot={false} activeDot={{ r: 4, fill: "#A6C9CE", strokeWidth: 0 }} connectNulls={false} />}
+        {showSeries("ca") && <Line type="monotone" dataKey="caPast" stroke="#3D8899" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#3D8899", strokeWidth: 0 }} connectNulls={false} />}
+        {showSeries("ebitda") && <Line type="monotone" dataKey="ebitdaPast" stroke="#22c55e" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#22c55e", strokeWidth: 0 }} connectNulls={false} />}
+        {/* ── FUTUR / PROJETÉS (pointillés) ── */}
+        {showSeries("salaires-p") && <Area type="monotone" dataKey="salairesProjected" stackId="chargesFuture" stroke="#f97316" strokeWidth={2} strokeDasharray="5 4" fill="url(#gSal)" fillOpacity={0.4} dot={false} activeDot={{ r: 4, fill: "#f97316", strokeWidth: 0 }} connectNulls={false} />}
+        {showSeries("depenses-p") && <Area type="monotone" dataKey="depensesProjected" stackId="chargesFuture" stroke="#ef4444" strokeWidth={2} strokeDasharray="5 4" fill="url(#gDep)" fillOpacity={0.4} dot={false} activeDot={{ r: 4, fill: "#ef4444", strokeWidth: 0 }} connectNulls={false} />}
+        {showSeries("revenu-p") && <Area type="monotone" dataKey="revenuProjected" stroke="#A6C9CE" strokeWidth={2} strokeDasharray="5 4" fill="url(#gRev)" fillOpacity={0.4} dot={false} activeDot={{ r: 4, fill: "#A6C9CE", strokeWidth: 0 }} connectNulls={false} />}
+        {showSeries("ca-p") && <Line type="monotone" dataKey="caProjected" stroke="#3D8899" strokeWidth={2} strokeDasharray="5 4" dot={false} activeDot={{ r: 4, fill: "#3D8899", strokeWidth: 0 }} connectNulls={false} />}
+        {showSeries("ebitda-p") && <Line type="monotone" dataKey="ebitdaProjected" stroke="#22c55e" strokeWidth={2} strokeDasharray="5 4" dot={false} activeDot={{ r: 4, fill: "#22c55e", strokeWidth: 0 }} connectNulls={false} />}
+      </AreaChart>
+    </ResponsiveContainer>
+  )
+
+  const renderLegend = () => (
+    <div style={{ padding: "12px 20px", borderTop: "1px solid rgba(166,201,206,0.08)" }}>
+      <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Actuels · clic pour masquer</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+        {HERO_SERIES_ACTUAL.map(s => {
+          const hid = hidden.has(s.key)
+          const total = s.key === "ca" ? totals.ca : s.key === "revenu" ? totals.rev : s.key === "depenses" ? totals.dep : s.key === "salaires" ? totals.sal : totals.ebitda
+          return (
+            <button key={s.key} onClick={() => toggleHidden(s.key)} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", background: hid ? "rgba(166,201,206,0.04)" : `${s.color}15`, border: `1px solid ${hid ? "var(--border-subtle)" : s.color}55`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: "var(--fs-2xs)", opacity: hid ? 0.4 : 1, textDecoration: hid ? "line-through" : "none" }}>
+              {s.type === "line"
+                ? <span style={{ width: 14, height: 2, background: s.color }} />
+                : <span style={{ width: 10, height: 10, borderRadius: 2, background: s.color }} />}
+              <span style={{ color: "var(--text-secondary)", fontWeight: 600 }}>{s.label}</span>
+              <span style={{ fontFamily: "monospace", color: "var(--text-primary)", fontWeight: 700 }}>{Math.round(total).toLocaleString("fr-FR")}</span>
+            </button>
+          )
+        })}
+      </div>
+      <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>Projetés (pointillés) · ne s'ajoutent pas aux actuels</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+        {HERO_SERIES_PROJECTED.map(s => {
+          const hid = hidden.has(s.key)
+          const total = s.key === "ca-p" ? projected.ca : s.key === "revenu-p" ? projected.rev : s.key === "depenses-p" ? projected.dep : s.key === "salaires-p" ? projected.sal : projected.ebitda
+          return (
+            <button key={s.key} onClick={() => toggleHidden(s.key)} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 10px", background: hid ? "rgba(166,201,206,0.04)" : `${s.color}10`, border: `1px dashed ${hid ? "var(--border-subtle)" : s.color}55`, borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontSize: "var(--fs-2xs)", opacity: hid ? 0.4 : 0.85, textDecoration: hid ? "line-through" : "none" }}>
+              {s.type === "line"
+                ? <span style={{ width: 14, height: 2, background: s.color, opacity: 0.7 }} />
+                : <span style={{ width: 10, height: 10, borderRadius: 2, background: s.color, opacity: 0.5 }} />}
+              <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>{s.label}</span>
+              <span style={{ fontFamily: "monospace", color: "var(--text-primary)", fontWeight: 600 }}>{Math.round(total).toLocaleString("fr-FR")}</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+
+  const renderControls = () => (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 24px", borderBottom: "1px solid rgba(166,201,206,0.06)", flexWrap: "wrap" }}>
+      <Seg value={heroMode} onChange={(v: string) => setHeroMode(v as any)} options={[["past", "Past"], ["future", "Future"], ["custom", "Custom"]]} />
+      {heroMode === "past" && (
+        <Seg value={heroPast} onChange={(v: string) => setHeroPast(v as any)} options={[["all", "All"], ["12m", "12m"], ["6m", "6m"], ["3m", "3m"]]} />
+      )}
+      {heroMode === "future" && (
+        <Seg value={heroFuture} onChange={(v: string) => setHeroFuture(v as any)} options={[["12m", "12m"], ["6m", "6m"], ["3m", "3m"]]} />
+      )}
+      {heroMode === "custom" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-2xs)" }}>
+          <label style={{ color: "var(--text-muted)" }}>Du</label>
+          <input type="month" value={heroCustomStart} onChange={(e: any) => setHeroCustomStart(e.target.value)} style={{ padding: "3px 6px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit" }} />
+          <label style={{ color: "var(--text-muted)" }}>au</label>
+          <input type="month" value={heroCustomEnd} onChange={(e: any) => setHeroCustomEnd(e.target.value)} style={{ padding: "3px 6px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit" }} />
+          {(heroCustomStart || heroCustomEnd) && (
+            <button onClick={() => { setHeroCustomStart(""); setHeroCustomEnd("") }} style={{ background: "none", border: "1px solid var(--border-subtle)", color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "3px 6px", borderRadius: 4, fontFamily: "inherit" }}>FY {fyLabel}</button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+
+  const body = (
+    <>
+      {renderControls()}
+      <div style={{ padding: "16px 16px 8px", flex: 1, minHeight: 0 }}>
+        {renderChart(fullscreen ? "calc(90vh - 280px)" : 340)}
+      </div>
+      {renderLegend()}
+    </>
+  )
+
+  if (fullscreen) {
+    return (
+      <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, animation: "fade-in 0.2s ease" }} onClick={() => setFullscreen(false)}>
+        <div style={{ background: "var(--bg-panel)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", border: "1px solid rgba(166,201,206,0.10)", borderRadius: 14, width: "95vw", height: "92vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }} onClick={e => e.stopPropagation()}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
+            <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "var(--text-primary)" }}>Finance Dashboard</div>
+            <button onClick={() => setFullscreen(false)} title="Réduire" style={{ background: "none", border: "1px solid var(--border-subtle)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>✕</button>
+          </div>
+          {body}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ background: "var(--bg-panel)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", border: "1px solid rgba(166,201,206,0.10)", borderRadius: 14, padding: 0, marginBottom: 24, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>Finance Dashboard</div>
+          <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>
+            CA &gt; Revenu (net commission) · Charges = Salaires + Dépenses · EBITDA = Revenu − Charges
+          </div>
+        </div>
+        <button onClick={() => setFullscreen(true)} title="Agrandir" style={{ background: "none", border: "1px solid var(--border-subtle)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>⛶</button>
+      </div>
+      {body}
+    </div>
+  )
+}
+
 // Bloc de contrôles Past/Future/Custom (utilisé par hero, revenus, charges)
 function ViewRangeToggle({ mode, setMode, past, setPast, future, setFuture, customStart, setCustomStart, customEnd, setCustomEnd, fyLabel }: {
   mode: "past" | "future" | "custom"; setMode: (v: "past" | "future" | "custom") => void
@@ -3178,28 +3356,29 @@ function RentaTooltip({ active, payload }: any) {
 
 function HeroTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null
-  // Lecture depuis le datum (agrégé) pour éviter les doublons past/future
   const datum = payload[0]?.payload
   if (!datum) return null
-  const dep = datum.depenses || 0
+  const ca = datum.ca || 0
   const rev = datum.revenus || 0
+  const commission = Math.max(0, ca - rev)
+  const dep = datum.depenses || 0
   const sal = datum.salaires || 0
   const isFuture = !!datum.isFuture
-  const net = isFuture ? null : (rev - dep - sal)
+  const ebitda = datum.ebitda ?? (rev - dep - sal)
   return (
-    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "14px 18px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)", fontSize: "var(--fs-xs)", minWidth: 220 }}>
+    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "14px 18px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)", fontSize: "var(--fs-xs)", minWidth: 240 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ fontWeight: 700, color: "var(--text-secondary)", fontSize: "var(--fs-sm)" }}>{label}</div>
         {isFuture && <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontStyle: "italic" }}>projection</span>}
       </div>
-      <TRow c="#A6C9CE" l="Revenus" v={Math.round(rev).toLocaleString("fr-FR")} vc="#A6C9CE" />
+      <TRow c="#3D8899" l="CA" v={Math.round(ca).toLocaleString("fr-FR")} vc="#3D8899" bold />
+      <TRow c="#A6C9CE" l="Revenu" v={Math.round(rev).toLocaleString("fr-FR")} vc="#A6C9CE" />
+      {commission > 0 && <TRow c="var(--text-muted)" l="Commission" v={`−${Math.round(commission).toLocaleString("fr-FR")}`} vc="var(--text-muted)" />}
       <TRow c="#ef4444" l="Dépenses" v={Math.round(dep).toLocaleString("fr-FR")} vc="#ef4444" />
       <TRow c="#f97316" l="Salaires" v={Math.round(sal).toLocaleString("fr-FR")} vc="#f97316" />
-      {net != null && (
-        <div style={{ borderTop: "1px solid rgba(166,201,206,0.10)", paddingTop: 6, marginTop: 6 }}>
-          <TRow c={net >= 0 ? "#22c55e" : "#ef4444"} l="Net" v={`${net >= 0 ? "+" : ""}${Math.round(net).toLocaleString("fr-FR")}`} vc={net >= 0 ? "#22c55e" : "#ef4444"} bold />
-        </div>
-      )}
+      <div style={{ borderTop: "1px solid rgba(166,201,206,0.10)", paddingTop: 6, marginTop: 6 }}>
+        <TRow c={ebitda >= 0 ? "#22c55e" : "#ef4444"} l="EBITDA" v={`${ebitda >= 0 ? "+" : ""}${Math.round(ebitda).toLocaleString("fr-FR")}`} vc={ebitda >= 0 ? "#22c55e" : "#ef4444"} bold />
+      </div>
     </div>
   )
 }
@@ -3212,9 +3391,11 @@ function RevenueTooltip({ active, payload, label, ventesListByMois }: any) {
   // Lecture agrégée depuis le datum (fonctionne avec revenusPast/revenusFuture ou types par past/future)
   const rev = point?.revenus ?? ((point?.revenusPast || 0) + (point?.revenusFuture || 0))
   const allVentes = (ventesListByMois?.[moisCode] || []) as Project[]
-  const ventes = allVentes.slice(0, 5)
+  // En fullscreen : liste complète, sinon top 5
+  const showAll = !!(ventesListByMois as any)?.__showAll
+  const ventes = showAll ? allVentes : allVentes.slice(0, 5)
   return (
-    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "14px 18px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)", fontSize: "var(--fs-xs)", minWidth: 240, maxWidth: 340 }}>
+    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "14px 18px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)", fontSize: "var(--fs-xs)", minWidth: 240, maxWidth: showAll ? 420 : 340, maxHeight: showAll ? "70vh" : undefined, overflowY: showAll ? "auto" : undefined }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <div style={{ fontWeight: 700, color: "var(--text-secondary)", fontSize: "var(--fs-sm)" }}>{label}</div>
         {isFuture && <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontStyle: "italic" }}>projection</span>}
@@ -3222,14 +3403,14 @@ function RevenueTooltip({ active, payload, label, ventesListByMois }: any) {
       <TRow c="#A6C9CE" l="Revenus" v={`${Math.round(rev).toLocaleString("fr-FR")} MUR`} vc="#A6C9CE" />
       {ventes.length > 0 && (
         <div style={{ borderTop: "1px solid rgba(166,201,206,0.10)", paddingTop: 8, marginTop: 8 }}>
-          <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>Ventes du mois :</div>
+          <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginBottom: 4, fontWeight: 600 }}>Ventes du mois ({allVentes.length}) :</div>
           {ventes.map((p, i) => (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "2px 0", fontSize: "var(--fs-2xs)" }}>
               <span style={{ color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{p.clientName || p.name}</span>
               <span style={{ fontFamily: "monospace", fontWeight: 600, flexShrink: 0 }}>{Math.round(getRevenueRaw(p)).toLocaleString("fr-FR")} {p.currency}</span>
             </div>
           ))}
-          {allVentes.length > 5 && <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4, fontStyle: "italic" }}>+ {allVentes.length - 5} autres — cliquez pour voir toutes</div>}
+          {!showAll && allVentes.length > 5 && <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4, fontStyle: "italic" }}>+ {allVentes.length - 5} autres</div>}
         </div>
       )}
       {ventes.length === 0 && <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 6, fontStyle: "italic" }}>Aucune vente ce mois</div>}
