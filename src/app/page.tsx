@@ -62,17 +62,41 @@ const toMUR = (amount: number, currency: string | undefined | null): number => {
   return (amount || 0) * rate
 }
 
-// Règle revenus : Quoted Amount × Win % (gut feeling), normalisé
-// Permet de projeter le futur sans biaiser le passé (projets gagnés → win = 100%)
+// Helpers : Win % et Commission % normalisés (0-1)
 function getWinRate(p: Project): number {
   const w = Number(p.winPercent || 0)
   if (w <= 0) return 0
   return w > 1 ? w / 100 : w
 }
+function getCommissionRate(p: Project): number {
+  const c = Number(p.commissionPercent || 0)
+  if (c <= 0) return 0
+  return c > 1 ? c / 100 : c
+}
+
+// ─── Définition UNIQUE du Revenu (utilisé partout) ─────────────────
+// Revenu = Net Amount = Final Amount − Commission (dans la devise du projet)
+// Fallback pour projets non encore réalisés : Quoted × Win% × (1 − commission%)
+// Permet de ne JAMAIS compter la part commission comme revenu Eqxia.
 function getRevenueRaw(p: Project): number {
+  const commNet = 1 - getCommissionRate(p)
+  if (p.finalAmount && p.finalAmount > 0) {
+    return p.finalAmount * commNet
+  }
+  return (p.quotedAmount || 0) * getWinRate(p) * commNet
+}
+// CA brut (avant commission) — utilisé dans le bloc Cash pour PNL
+function getCARaw(p: Project): number {
+  if (p.finalAmount && p.finalAmount > 0) return p.finalAmount
   return (p.quotedAmount || 0) * getWinRate(p)
 }
+function getCommissionRaw(p: Project): number {
+  return getCARaw(p) * getCommissionRate(p)
+}
+
 const getRevenueMUR = (p: Project): number => toMUR(getRevenueRaw(p), p.currency)
+const getCAMUR = (p: Project): number => toMUR(getCARaw(p), p.currency)
+const getCommissionMUR = (p: Project): number => toMUR(getCommissionRaw(p), p.currency)
 
 // Mois associé au revenu : End Date (fallback Start Date)
 function getRevenueDateISO(p: Project): string {
@@ -150,18 +174,29 @@ export default function DashboardPage() {
   const revPeriod = kpiPeriod
   const [revMode, setRevMode] = useState<"total" | "types">("total")
   const [chargesMode, setChargesMode] = useState<"all" | "depenses" | "salaires">("all")
+  // Toggles Past/Future/Custom pour chart Revenus mensuels
+  const [revViewMode, setRevViewMode] = useState<"past" | "future" | "custom">("past")
+  const [revViewPast, setRevViewPast] = useState<"all" | "12m" | "6m" | "3m">("all")
+  const [revViewFuture, setRevViewFuture] = useState<"12m" | "6m" | "3m">("3m")
+  const [revViewCustomStart, setRevViewCustomStart] = useState<string>("")
+  const [revViewCustomEnd, setRevViewCustomEnd] = useState<string>("")
+  // Toggles Past/Future/Custom pour chart Charges mensuelles
+  const [depViewMode, setDepViewMode] = useState<"past" | "future" | "custom">("past")
+  const [depViewPast, setDepViewPast] = useState<"all" | "12m" | "6m" | "3m">("all")
+  const [depViewFuture, setDepViewFuture] = useState<"12m" | "6m" | "3m">("3m")
+  const [depViewCustomStart, setDepViewCustomStart] = useState<string>("")
+  const [depViewCustomEnd, setDepViewCustomEnd] = useState<string>("")
   const [topMode, setTopMode] = useState<"clients" | "fournisseurs">("clients")
   const [tableMode, setTableMode] = useState<"ventes" | "depenses">("ventes")
 
   // Modal states
   const [editProject, setEditProject] = useState<Project | null>(null)
+  const [editProjectMissing, setEditProjectMissing] = useState<string[] | undefined>(undefined)
   const [editDepense, setEditDepense] = useState<Depense | null>(null)
   const [showAddVente, setShowAddVente] = useState(false)
   const [saving, setSaving] = useState(false)
-  // Freeze & hover states pour les charts mensuels
-  const [pinnedRevMois, setPinnedRevMois] = useState<string | null>(null)
+  // Hover states pour les charts mensuels
   const [hoverRevMois, setHoverRevMois] = useState<string | null>(null)
-  const [pinnedDepMois, setPinnedDepMois] = useState<string | null>(null)
   const [hoverDepMois, setHoverDepMois] = useState<string | null>(null)
   const hoverRevRef = useRef<string | null>(null)
   const hoverDepRef = useRef<string | null>(null)
@@ -172,23 +207,8 @@ export default function DashboardPage() {
   const [depFsFilterMois, setDepFsFilterMois] = useState<string>("")
   const [topDetailItem, setTopDetailItem] = useState<{ mode: "clients" | "fournisseurs"; name: string } | null>(null)
 
-  // Escape pour défiger + clic en dehors des charts pour défiger
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setPinnedRevMois(null); setPinnedDepMois(null) }
-    }
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (pinnedRevMois && revChartRef.current && !revChartRef.current.contains(target)) setPinnedRevMois(null)
-      if (pinnedDepMois && depChartRef.current && !depChartRef.current.contains(target)) setPinnedDepMois(null)
-    }
-    document.addEventListener("keydown", onKey)
-    document.addEventListener("mousedown", onDown)
-    return () => { document.removeEventListener("keydown", onKey); document.removeEventListener("mousedown", onDown) }
-  }, [pinnedRevMois, pinnedDepMois])
-
-  const currentRevMois = pinnedRevMois || hoverRevMois
-  const currentDepMois = pinnedDepMois || hoverDepMois
+  const currentRevMois = hoverRevMois
+  const currentDepMois = hoverDepMois
 
   // Filter states
   const [venteFilters, setVenteFilters] = useState<Record<string, string>>({})
@@ -311,17 +331,84 @@ export default function DashboardPage() {
   const chargesTotal = depTotal + salairesForDepPeriod
   const avgMarginWithSalaries = revTotal > 0 ? ((revTotal - chargesTotal) / revTotal) * 100 : 0
 
+  // Helper factorisé : construit la liste de codes de mois selon le mode (Past/Future/Custom)
+  const buildMonthCodes = useCallback((
+    mode: "past" | "future" | "custom",
+    past: "all" | "12m" | "6m" | "3m",
+    future: "12m" | "6m" | "3m",
+    customStart: string,
+    customEnd: string,
+    existingMonths: string[],
+  ): string[] => {
+    const curY = parseInt(currentDossier.slice(0, 2), 10)
+    const curM = parseInt(currentDossier.slice(2), 10)
+    const addRange = (fromY: number, fromM: number, toY: number, toM: number): string[] => {
+      const out: string[] = []
+      let y = fromY, m = fromM
+      while (y < toY || (y === toY && m <= toM)) {
+        out.push(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
+        m++; if (m > 12) { m = 1; y++ }
+      }
+      return out
+    }
+    if (mode === "past") {
+      let sorted = [...new Set(existingMonths)].sort().filter(c => c <= currentDossier)
+      if (past !== "all") {
+        const n = past === "12m" ? 12 : past === "6m" ? 6 : 3
+        sorted = sorted.slice(-n)
+      }
+      if (sorted.length < 2) return sorted
+      const y1 = parseInt(sorted[0].slice(0, 2), 10), m1 = parseInt(sorted[0].slice(2), 10)
+      const y2 = parseInt(sorted[sorted.length - 1].slice(0, 2), 10), m2 = parseInt(sorted[sorted.length - 1].slice(2), 10)
+      return addRange(y1, m1, y2, m2)
+    }
+    if (mode === "future") {
+      const n = future === "12m" ? 12 : future === "6m" ? 6 : 3
+      let toY = curY, toM = curM + n
+      while (toM > 12) { toM -= 12; toY += 1 }
+      return addRange(curY, curM, toY, toM)
+    }
+    // custom
+    const parse = (s: string): [number, number] | null => {
+      if (!s || s.length < 7) return null
+      const [y, m] = s.split("-")
+      return [parseInt(y, 10) % 100, parseInt(m, 10)]
+    }
+    const s = parse(customStart), e = parse(customEnd)
+    if (s && e) return addRange(s[0], s[1], e[0], e[1])
+    const fyY = fyStartYear % 100
+    return addRange(fyY, 7, fyY + 1, 6)
+  }, [currentDossier, fyStartYear])
+
   // Charts data — inclut salaires (colonne "Salaires") pour stacker comme la chart principale
+  // Accepte les modes Past/Future/Custom via depView*
   const depParMois = useMemo(() => {
     const m: Record<string, Record<string, number>> = {}
     depenses.forEach(d => { if (!d.dossier) return; if (!m[d.dossier]) m[d.dossier] = {}; m[d.dossier][d.categorie] = (m[d.dossier][d.categorie] || 0) + d.montantMUR })
-    return Object.entries(m).sort(([a], [b]) => a.localeCompare(b)).map(([dossier, cats]) => ({
-      dossier,
-      label: fmtDossier(dossier),
-      Salaires: dossier >= SALAIRE_START_CODE ? salaireMensuel : 0,
-      ...cats,
-    }))
-  }, [depenses, salaireMensuel])
+    const existing = Object.keys(m)
+    const codes = buildMonthCodes(depViewMode, depViewPast, depViewFuture, depViewCustomStart, depViewCustomEnd, existing)
+    return codes.map(dossier => {
+      const isFuture = dossier > currentDossier
+      const cats = m[dossier] || {}
+      // Futur : catégories = 0, salaires = valeur projetée ; on simule aussi les dépenses récurrentes critiques globales
+      if (isFuture) {
+        return {
+          dossier,
+          label: fmtDossier(dossier),
+          Salaires: dossier >= SALAIRE_START_CODE ? salaireMensuel : 0,
+          __recurringCritical: recurringCriticalMensuel,
+          isFuture: true,
+        }
+      }
+      return {
+        dossier,
+        label: fmtDossier(dossier),
+        Salaires: dossier >= SALAIRE_START_CODE ? salaireMensuel : 0,
+        isFuture: false,
+        ...cats,
+      }
+    })
+  }, [depenses, salaireMensuel, recurringCriticalMensuel, depViewMode, depViewPast, depViewFuture, depViewCustomStart, depViewCustomEnd, currentDossier, buildMonthCodes])
   // Ordonné selon l'importance (même ordre que le pie "Dépenses par catégorie")
   const allCats = useMemo(() => {
     const m: Record<string, number> = {}
@@ -344,7 +431,7 @@ export default function DashboardPage() {
     return m
   }, [depParCat])
 
-  // Plage de mois commune pour les charts Revenus mensuels (Total + Par types) : min existant → current+3
+  // Plage de mois Revenus mensuels (Total + Par types) — dépend du revView*
   const revChartRange = useMemo(() => {
     const revMap: Record<string, number> = {}
     projects.forEach(p => {
@@ -356,29 +443,10 @@ export default function DashboardPage() {
     })
     const depMap: Record<string, number> = {}
     depenses.forEach(d => { if (d.dossier) depMap[d.dossier] = (depMap[d.dossier] || 0) + d.montantMUR })
-    const allKeys = new Set([...Object.keys(revMap), ...Object.keys(depMap)])
-    const curY = parseInt(currentDossier.slice(0, 2), 10)
-    const curM = parseInt(currentDossier.slice(2), 10)
-    for (let i = 0; i <= 3; i++) {
-      let y = curY, m = curM + i
-      while (m > 12) { m -= 12; y += 1 }
-      allKeys.add(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
-    }
-    const sorted = [...allKeys].sort()
-    const filled: string[] = []
-    if (sorted.length >= 2) {
-      const [y1, m1] = [parseInt(sorted[0].slice(0, 2), 10), parseInt(sorted[0].slice(2), 10)]
-      const [y2, m2] = [parseInt(sorted[sorted.length - 1].slice(0, 2), 10), parseInt(sorted[sorted.length - 1].slice(2), 10)]
-      let y = y1, m = m1
-      while (y < y2 || (y === y2 && m <= m2)) {
-        filled.push(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
-        m++; if (m > 12) { m = 1; y++ }
-      }
-    } else if (sorted.length === 1) {
-      filled.push(sorted[0])
-    }
+    const existing = [...new Set([...Object.keys(revMap), ...Object.keys(depMap)])]
+    const filled = buildMonthCodes(revViewMode, revViewPast, revViewFuture, revViewCustomStart, revViewCustomEnd, existing)
     return { filled, revMap, depMap }
-  }, [projects, depenses, currentDossier])
+  }, [projects, depenses, revViewMode, revViewPast, revViewFuture, revViewCustomStart, revViewCustomEnd, buildMonthCodes])
 
   const revParMois = useMemo(() => {
     const { filled, revMap, depMap } = revChartRange
@@ -453,10 +521,11 @@ export default function DashboardPage() {
     return m
   }, [depenses])
 
-  // Liste des ventes par mois (clé = dossier-style "YYMM") — pour tooltip "Revenus mensuels"
+  // Liste des ventes/projets par mois (clé = dossier-style "YYMM") — pour tooltip "Revenus mensuels"
+  // Inclut TOUS les projets avec revenu > 0, sans filtrer sur Status — permet d'afficher les projections
   const ventesListByMois = useMemo(() => {
     const m: Record<string, Project[]> = {}
-    projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status) && getRevenueRaw(p) > 0).forEach(p => {
+    projects.filter(p => getRevenueRaw(p) > 0).forEach(p => {
       const iso = getRevenueDateISO(p)
       if (!iso) return
       const d = new Date(iso)
@@ -464,7 +533,6 @@ export default function DashboardPage() {
       if (!m[k]) m[k] = []
       m[k].push(p)
     })
-    // Trier chaque mois par montant décroissant (en MUR)
     Object.keys(m).forEach(k => m[k].sort((a, b) => getRevenueMUR(b) - getRevenueMUR(a)))
     return m
   }, [projects])
@@ -535,12 +603,20 @@ export default function DashboardPage() {
 
   const topData = topMode === "clients" ? topClients : topFourn
 
-  // Rentabilité: filter out Internal projects
+  // Rentabilité: filter out Internal projects — couleur par type de projet
   const rentaData = useMemo(() =>
     projects
       .filter(p => getRevenueRaw(p) > 0 && p.rentabilite != null && p.type !== "Internal")
       .map(p => ({
-        name: p.name, x: getRevenueMUR(p), y: (p.rentabilite ?? 0) * 100, risk: p.riskLevel || "Null",
+        name: p.name,
+        x: getRevenueMUR(p),
+        y: (p.rentabilite ?? 0) * 100,
+        risk: p.riskLevel || "Null",
+        type: p.type || "N/A",
+        clientName: p.clientName,
+        status: p.status,
+        finalAmount: p.finalAmount,
+        currency: p.currency,
       }))
   , [projects])
 
@@ -731,50 +807,65 @@ export default function DashboardPage() {
     })
   }, [projectsHealth, healthFilter])
 
-  // ── Cash / Commissions ────────────────────────────────────────
-  // Règle : si "Ad-hoc commissions 1 ? (eg training services)" est rempli,
-  // commission = "% of commissions" × "Final Amount" (dans la devise du projet, converti en MUR)
+  // ── PNL / Cash — métriques standard pour service company ─────────────
+  // CA (Chiffre d'Affaires) = Final Amount MUR (ou Quoted×Win% si non réalisé)
+  // Commissions = % of commissions × Final Amount → versées à des tiers
+  // Revenu net = CA − Commissions (ce qu'Eqxia conserve)
+  // Dépenses = totalité des dépenses opérationnelles
+  // Salaires = Σ(CJE × 220/12) × nb mois salariés
+  // Charges = Dépenses + Salaires
+  // Marge brute = Revenu net − Dépenses directes (on simplifie : − dépenses, hors salaires)
+  // EBITDA = Revenu net − Charges (dépenses + salaires opérationnels)
+  // Marge EBITDA % = EBITDA / CA × 100
   const cashData = useMemo(() => {
     const wonProjects = projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status))
     let caTotal = 0
-    let eqxiaTotal = 0
+    let revenuNet = 0
     let commissionsTotal = 0
     const byBeneficiaire: Record<string, { total: number; percent: number; projectCount: number; projects: { name: string; amount: number; pct: number }[] }> = {}
 
     for (const p of wonProjects) {
-      const caMUR = getRevenueMUR(p)
+      const caMUR = getCAMUR(p)
       if (!caMUR) continue
       caTotal += caMUR
 
       const beneficiaire = (p.commissionTo || "").trim()
-      const pct = Number(p.commissionPercent || 0)
-      // Normalise : si > 1 → /100 (pourcentage stocké en number 0-100)
-      const normalizedPct = pct > 1 ? pct / 100 : pct
+      const normalizedPct = getCommissionRate(p)
 
       if (beneficiaire && normalizedPct > 0 && p.finalAmount > 0) {
-        // Commission strictement = "% of commissions" * "Final Amount" (en devise du projet, converti MUR)
         const commissionMUR = toMUR(p.finalAmount * normalizedPct, p.currency)
         commissionsTotal += commissionMUR
-        eqxiaTotal += caMUR - commissionMUR
+        revenuNet += caMUR - commissionMUR
         const percentLabel = normalizedPct * 100
         if (!byBeneficiaire[beneficiaire]) byBeneficiaire[beneficiaire] = { total: 0, percent: percentLabel, projectCount: 0, projects: [] }
         byBeneficiaire[beneficiaire].total += commissionMUR
         byBeneficiaire[beneficiaire].projectCount += 1
         byBeneficiaire[beneficiaire].projects.push({ name: p.name, amount: commissionMUR, pct: percentLabel })
       } else {
-        eqxiaTotal += caMUR
+        revenuNet += caMUR
       }
     }
     const beneficiaires = Object.entries(byBeneficiaire)
       .map(([name, v]) => ({
         name,
         ...v,
-        // % affiché = moyenne pondérée par le montant
         percent: v.projects.length > 0 ? (v.projects.reduce((s, pr) => s + pr.pct * pr.amount, 0) / (v.total || 1)) : v.percent,
       }))
       .sort((a, b) => b.total - a.total)
-    return { caTotal, eqxiaTotal, commissionsTotal, beneficiaires }
-  }, [projects])
+
+    // Charges opérationnelles (toutes périodes confondues)
+    const depAll = depenses.reduce((s, d) => s + d.montantMUR, 0)
+    const salAll = salaireMensuel * computeSalariedMonths("all")
+    const chargesAll = depAll + salAll
+
+    // Indicateurs PNL
+    const margeBrute = revenuNet - depAll            // Revenu net − dépenses opérationnelles
+    const ebitda = revenuNet - chargesAll            // Revenu net − (dépenses + salaires)
+    const margeEbitdaPct = caTotal > 0 ? (ebitda / caTotal) * 100 : 0
+    const margeNettePct = caTotal > 0 ? (revenuNet / caTotal) * 100 : 0
+
+    return { caTotal, revenuNet, commissionsTotal, beneficiaires, depAll, salAll, chargesAll, margeBrute, ebitda, margeEbitdaPct, margeNettePct }
+  }, [projects, depenses, salaireMensuel, computeSalariedMonths])
 
   // Mois disponibles (décroissant) pour le filtre Date des Dernières ventes — format "YYYY-MM"
   // Basé sur End Date (= mois du revenu)
@@ -1043,8 +1134,20 @@ export default function DashboardPage() {
           <div data-row="depenses" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16, order: 2 }}>
             <ChartCard
               title="Charges mensuelles"
-              sub="Salaires + Dépenses · survolez un mois · cliquez pour figer"
-              right={<Seg value={chargesMode} onChange={v => setChargesMode(v as any)} options={[["all", "Total"], ["depenses", "Dépenses"], ["salaires", "Salaires"]]} />}
+              sub="Salaires + Dépenses"
+              right={
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <Seg value={chargesMode} onChange={v => setChargesMode(v as any)} options={[["all", "Total"], ["depenses", "Dépenses"], ["salaires", "Salaires"]]} />
+                  <ViewRangeToggle
+                    mode={depViewMode} setMode={setDepViewMode}
+                    past={depViewPast} setPast={setDepViewPast}
+                    future={depViewFuture} setFuture={setDepViewFuture}
+                    customStart={depViewCustomStart} setCustomStart={setDepViewCustomStart}
+                    customEnd={depViewCustomEnd} setCustomEnd={setDepViewCustomEnd}
+                    fyLabel={fy.label}
+                  />
+                </div>
+              }
               value={
                 <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
                   <span>{`${Math.round(depTotalAll + salaireMensuel * computeSalariedMonths("all")).toLocaleString("fr-FR")} MUR`}</span>
@@ -1064,7 +1167,7 @@ export default function DashboardPage() {
               }
               expandable
               renderExpanded={() => {
-                const filterMois = pinnedDepMois || depFsFilterMois
+                const filterMois = depFsFilterMois
                 const allMonthCodes = [...new Set(depenses.map(d => d.dossier).filter(Boolean))].sort().reverse()
                 const listItems = (filterMois ? depenses.filter(d => d.dossier === filterMois) : depenses)
                   .slice()
@@ -1076,12 +1179,6 @@ export default function DashboardPage() {
                     <div
                       ref={depChartRef}
                       style={{ flexShrink: 0, cursor: "pointer" }}
-                      onClick={(e) => {
-                        const target = e.target as HTMLElement
-                        if (target.closest('button') || target.closest('select') || target.closest('input')) return
-                        const code = hoverDepRef.current
-                        if (code) setPinnedDepMois(prev => prev === code ? null : code)
-                      }}
                     >
                       <ResponsiveContainer width="100%" height={300}>
                         <AreaChart
@@ -1090,10 +1187,10 @@ export default function DashboardPage() {
                             const code = e?.activePayload?.[0]?.payload?.dossier
                             if (code) {
                               hoverDepRef.current = code
-                              if (!pinnedDepMois && code !== hoverDepMois) setHoverDepMois(code)
+                              if (code !== hoverDepMois) setHoverDepMois(code)
                             }
                           }}
-                          onMouseLeave={() => { if (!pinnedDepMois) { hoverDepRef.current = null; setHoverDepMois(null) } }}
+                          onMouseLeave={() => { hoverDepRef.current = null; setHoverDepMois(null) }}
                           style={{ cursor: "pointer" }}
                         >
                           <defs>
@@ -1114,7 +1211,7 @@ export default function DashboardPage() {
                           {chargesMode !== "salaires" && allCats.map((cat, i) => (
                             <Area key={cat} type="monotone" dataKey={cat} stackId="1" stroke={PIE_CAT[i % PIE_CAT.length]} strokeWidth={0.5} fill={`url(#gCatFs${i})`} />
                           ))}
-                          {currentDepMois && <ReferenceLine x={fmtDossier(currentDepMois)} stroke={pinnedDepMois ? "var(--accent)" : "rgba(166,201,206,0.4)"} strokeWidth={pinnedDepMois ? 2 : 1} strokeDasharray={pinnedDepMois ? "0" : "3 3"} />}
+                          {currentDepMois && <ReferenceLine x={fmtDossier(currentDepMois)} stroke="rgba(166,201,206,0.4)" strokeWidth={1} strokeDasharray="3 3" />}
                         </AreaChart>
                       </ResponsiveContainer>
                       {/* Légende sous le chart */}
@@ -1142,25 +1239,20 @@ export default function DashboardPage() {
                           <div style={{ fontSize: "var(--fs-xs)", color: "#ef4444", fontFamily: "monospace", fontWeight: 700 }}>
                             {Math.round(listTotal).toLocaleString("fr-FR")} MUR
                           </div>
-                          {pinnedDepMois && (
-                            <span style={{ fontSize: "var(--fs-2xs)", color: "var(--accent)", fontWeight: 600, background: "var(--accent-soft)", padding: "2px 8px", borderRadius: 4 }}>
-                              📌 Figé : {fmtDossier(pinnedDepMois)}
-                            </span>
-                          )}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <label style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 500 }}>Filtrer par mois :</label>
                           <select
                             value={depFsFilterMois}
-                            onChange={e => { setDepFsFilterMois(e.target.value); setPinnedDepMois(null) }}
+                            onChange={e => setDepFsFilterMois(e.target.value)}
                             style={{ padding: "4px 8px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit", outline: "none" }}
                           >
                             <option value="">Tous les mois</option>
                             {allMonthCodes.map(c => <option key={c} value={c}>{fmtDossier(c)}</option>)}
                           </select>
-                          {(depFsFilterMois || pinnedDepMois) && (
+                          {depFsFilterMois && (
                             <button
-                              onClick={() => { setDepFsFilterMois(""); setPinnedDepMois(null) }}
+                              onClick={() => setDepFsFilterMois("")}
                               style={{ background: "none", border: "1px solid var(--border-subtle)", color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "4px 8px", borderRadius: 4, fontFamily: "inherit" }}
                             >
                               Réinitialiser
@@ -1205,13 +1297,7 @@ export default function DashboardPage() {
             >
               <div
                 ref={depChartRef}
-                style={{ position: "relative", cursor: "pointer" }}
-                onClick={(e) => {
-                  const target = e.target as HTMLElement
-                  if (target.closest('button')) return
-                  const code = hoverDepRef.current
-                  if (code) setPinnedDepMois(prev => prev === code ? null : code)
-                }}
+                style={{ position: "relative" }}
               >
                 <ResponsiveContainer width="100%" height={280}>
                   <AreaChart
@@ -1220,15 +1306,10 @@ export default function DashboardPage() {
                       const code = e?.activePayload?.[0]?.payload?.dossier
                       if (code) {
                         hoverDepRef.current = code
-                        if (!pinnedDepMois && code !== hoverDepMois) setHoverDepMois(code)
+                        if (code !== hoverDepMois) setHoverDepMois(code)
                       }
                     }}
-                    onMouseLeave={() => { if (!pinnedDepMois) { hoverDepRef.current = null; setHoverDepMois(null) } }}
-                    onClick={(e: any) => {
-                      const code = e?.activePayload?.[0]?.payload?.dossier || hoverDepRef.current
-                      if (code) setPinnedDepMois(prev => prev === code ? null : code)
-                    }}
-                    style={{ cursor: "pointer" }}
+                    onMouseLeave={() => { hoverDepRef.current = null; setHoverDepMois(null) }}
                   >
                     <defs>
                       <linearGradient id="gSal2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#f97316" stopOpacity={0.5} /><stop offset="100%" stopColor="#f97316" stopOpacity={0.05} /></linearGradient>
@@ -1249,12 +1330,8 @@ export default function DashboardPage() {
                     {chargesMode !== "salaires" && allCats.map((cat, i) => (
                       <Area key={cat} type="monotone" dataKey={cat} stackId="1" stroke={PIE_CAT[i % PIE_CAT.length]} strokeWidth={0.5} fill={`url(#gCat${i})`} />
                     ))}
-                    {pinnedDepMois && <ReferenceLine x={fmtDossier(pinnedDepMois)} stroke="var(--accent)" strokeWidth={2} />}
                   </AreaChart>
                 </ResponsiveContainer>
-                {pinnedDepMois && (
-                  <FrozenBadge label={fmtDossier(pinnedDepMois)} onClear={() => setPinnedDepMois(null)} />
-                )}
               </div>
             </ChartCard>
 
@@ -1297,12 +1374,24 @@ export default function DashboardPage() {
           <div data-row="revenus" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16, marginBottom: 16, order: 1 }}>
             <ChartCard
               title="Revenus mensuels"
-              sub="Survolez un mois · cliquez pour figer"
+              sub="Revenu net = Final Amount − Commission"
               value={`${Math.round(revTotalAll).toLocaleString("fr-FR")} MUR`}
               expandable
-              right={<Seg value={revMode} onChange={v => setRevMode(v as any)} options={[["total", "Total"], ["types", "Par types"]]} />}
+              right={
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <Seg value={revMode} onChange={v => setRevMode(v as any)} options={[["total", "Total"], ["types", "Par types"]]} />
+                  <ViewRangeToggle
+                    mode={revViewMode} setMode={setRevViewMode}
+                    past={revViewPast} setPast={setRevViewPast}
+                    future={revViewFuture} setFuture={setRevViewFuture}
+                    customStart={revViewCustomStart} setCustomStart={setRevViewCustomStart}
+                    customEnd={revViewCustomEnd} setCustomEnd={setRevViewCustomEnd}
+                    fyLabel={fy.label}
+                  />
+                </div>
+              }
               renderExpanded={() => {
-                const filterMois = pinnedRevMois || revFsFilterMois
+                const filterMois = revFsFilterMois
                 const wonProjects = projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status) && getRevenueRaw(p) > 0)
                 const allVentesMonths = [...new Set(wonProjects.map(p => dossierFromDate(getRevenueDateISO(p))).filter(Boolean))].sort().reverse()
                 const listItems = (filterMois ? wonProjects.filter(p => dossierFromDate(getRevenueDateISO(p)) === filterMois) : wonProjects)
@@ -1315,12 +1404,6 @@ export default function DashboardPage() {
                     <div
                       ref={revChartRef}
                       style={{ flexShrink: 0, cursor: "pointer" }}
-                      onClick={(e) => {
-                        const target = e.target as HTMLElement
-                        if (target.closest('button') || target.closest('select') || target.closest('input')) return
-                        const code = hoverRevRef.current
-                        if (code) setPinnedRevMois(prev => prev === code ? null : code)
-                      }}
                     >
                       <ResponsiveContainer width="100%" height={300}>
                         <AreaChart
@@ -1329,10 +1412,10 @@ export default function DashboardPage() {
                             const code = e?.activePayload?.[0]?.payload?.mois
                             if (code) {
                               hoverRevRef.current = code
-                              if (!pinnedRevMois && code !== hoverRevMois) setHoverRevMois(code)
+                              if (code !== hoverRevMois) setHoverRevMois(code)
                             }
                           }}
-                          onMouseLeave={() => { if (!pinnedRevMois) { hoverRevRef.current = null; setHoverRevMois(null) } }}
+                          onMouseLeave={() => { hoverRevRef.current = null; setHoverRevMois(null) }}
                           style={{ cursor: "pointer" }}
                         >
                           <defs>
@@ -1361,7 +1444,7 @@ export default function DashboardPage() {
                               ))}
                             </>
                           )}
-                          {currentRevMois && <ReferenceLine x={fmtDossier(currentRevMois)} stroke={pinnedRevMois ? "var(--accent)" : "rgba(166,201,206,0.4)"} strokeWidth={pinnedRevMois ? 2 : 1} strokeDasharray={pinnedRevMois ? "0" : "3 3"} />}
+                          {currentRevMois && <ReferenceLine x={fmtDossier(currentRevMois)} stroke="rgba(166,201,206,0.4)" strokeWidth={1} strokeDasharray="3 3" />}
                         </AreaChart>
                       </ResponsiveContainer>
                       {/* Légende sous le chart */}
@@ -1392,25 +1475,20 @@ export default function DashboardPage() {
                           <div style={{ fontSize: "var(--fs-xs)", color: "var(--accent)", fontFamily: "monospace", fontWeight: 700 }}>
                             {Math.round(listTotal).toLocaleString("fr-FR")} MUR
                           </div>
-                          {pinnedRevMois && (
-                            <span style={{ fontSize: "var(--fs-2xs)", color: "var(--accent)", fontWeight: 600, background: "var(--accent-soft)", padding: "2px 8px", borderRadius: 4 }}>
-                              📌 Figé : {fmtDossier(pinnedRevMois)}
-                            </span>
-                          )}
                         </div>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <label style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 500 }}>Filtrer par mois :</label>
                           <select
                             value={revFsFilterMois}
-                            onChange={e => { setRevFsFilterMois(e.target.value); setPinnedRevMois(null) }}
+                            onChange={e => setRevFsFilterMois(e.target.value)}
                             style={{ padding: "4px 8px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit", outline: "none" }}
                           >
                             <option value="">Tous les mois</option>
                             {allVentesMonths.map(c => <option key={c} value={c}>{fmtDossier(c)}</option>)}
                           </select>
-                          {(revFsFilterMois || pinnedRevMois) && (
+                          {revFsFilterMois && (
                             <button
-                              onClick={() => { setRevFsFilterMois(""); setPinnedRevMois(null) }}
+                              onClick={() => setRevFsFilterMois("")}
                               style={{ background: "none", border: "1px solid var(--border-subtle)", color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "4px 8px", borderRadius: 4, fontFamily: "inherit" }}
                             >
                               Réinitialiser
@@ -1456,13 +1534,7 @@ export default function DashboardPage() {
             >
               <div
                 ref={revChartRef}
-                style={{ position: "relative", cursor: "pointer" }}
-                onClick={(e) => {
-                  const target = e.target as HTMLElement
-                  if (target.closest('button')) return
-                  const code = hoverRevRef.current
-                  if (code) setPinnedRevMois(prev => prev === code ? null : code)
-                }}
+                style={{ position: "relative" }}
               >
                 <ResponsiveContainer width="100%" height={280}>
                   <AreaChart
@@ -1471,15 +1543,10 @@ export default function DashboardPage() {
                       const code = e?.activePayload?.[0]?.payload?.mois
                       if (code) {
                         hoverRevRef.current = code
-                        if (!pinnedRevMois && code !== hoverRevMois) setHoverRevMois(code)
+                        if (code !== hoverRevMois) setHoverRevMois(code)
                       }
                     }}
-                    onMouseLeave={() => { if (!pinnedRevMois) { hoverRevRef.current = null; setHoverRevMois(null) } }}
-                    onClick={(e: any) => {
-                      const code = e?.activePayload?.[0]?.payload?.mois || hoverRevRef.current
-                      if (code) setPinnedRevMois(prev => prev === code ? null : code)
-                    }}
-                    style={{ cursor: "pointer" }}
+                    onMouseLeave={() => { hoverRevRef.current = null; setHoverRevMois(null) }}
                   >
                     <defs>
                       <linearGradient id="gRev2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#A6C9CE" stopOpacity={0.4} /><stop offset="100%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient>
@@ -1507,12 +1574,8 @@ export default function DashboardPage() {
                         ))}
                       </>
                     )}
-                    {pinnedRevMois && <ReferenceLine x={fmtDossier(pinnedRevMois)} stroke="var(--accent)" strokeWidth={2} />}
                   </AreaChart>
                 </ResponsiveContainer>
-                {pinnedRevMois && (
-                  <FrozenBadge label={fmtDossier(pinnedRevMois)} onClear={() => setPinnedRevMois(null)} />
-                )}
               </div>
             </ChartCard>
 
@@ -1618,17 +1681,26 @@ export default function DashboardPage() {
               </div>
             </ChartCard>
 
-            <ChartCard title="Rentabilité projets" sub="Montant vs marge — couleur = risque">
+            <ChartCard title="Rentabilité projets" sub="Montant vs marge — couleur = type de projet">
               <ResponsiveContainer width="100%" height={260}>
                 <ScatterChart margin={{ left: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
                   <XAxis type="number" dataKey="x" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                   <YAxis type="number" dataKey="y" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} unit="%" />
                   <ZAxis range={[60, 200]} />
-                  <Tooltip content={<CTooltip formatter={(v: any, name: any) => name === "x" ? Math.round(Number(v)).toLocaleString("fr-FR") : `${Number(v).toFixed(1)}%`} />} />
-                  <Scatter data={rentaData} fill="#A6C9CE">{rentaData.map((e, i) => <Cell key={i} fill={RISK_COLORS[e.risk] || "#6b7280"} />)}</Scatter>
+                  <Tooltip content={<RentaTooltip />} />
+                  <Scatter data={rentaData} fill="#A6C9CE">{rentaData.map((e, i) => <Cell key={i} fill={projectTypeColors[e.type] || "#A6C9CE"} />)}</Scatter>
                 </ScatterChart>
               </ResponsiveContainer>
+              {/* Légende types */}
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10, padding: "10px 0 0", marginTop: 8, borderTop: "1px solid rgba(166,201,206,0.08)" }}>
+                {allProjectTypes.map(t => (
+                  <div key={t} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-2xs)" }}>
+                    <span style={{ width: 10, height: 10, borderRadius: "50%", background: projectTypeColors[t] }} />
+                    <span style={{ color: "var(--text-secondary)" }}>{t}</span>
+                  </div>
+                ))}
+              </div>
             </ChartCard>
           </div>
 
@@ -1737,39 +1809,77 @@ export default function DashboardPage() {
             </div>
           </ChartCard>
 
-          {/* ── Cash : CA, Eqxia, Commissions ── */}
+          {/* ── Cash / PNL ── */}
           <div style={{ ...card, marginTop: 24, padding: 0, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
               <div>
-                <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>💵 Cash</div>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>Chiffre d'affaires total · tout pour Eqxia sauf commissions versées</div>
+                <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>💵 Cash &amp; PNL</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>CA → Revenu net → Marge brute → EBITDA · basé sur toutes les périodes (all-time)</div>
               </div>
               <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).length} projet(s) Won/Active</div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0 }}>
-              <div style={{ padding: "20px 24px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>CA Total</div>
+
+            {/* Ligne 1 : Revenus */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0, borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
+              <div style={{ padding: "18px 24px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>CA (Chiffre d'Affaires)</div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
-                  <span style={{ fontSize: 28, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.02em", fontFamily: "monospace" }}>{Math.round(cashData.caTotal).toLocaleString("fr-FR")}</span>
-                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>MUR</span>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: "var(--text-primary)", fontFamily: "monospace" }}>{Math.round(cashData.caTotal).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
                 </div>
-                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>100 %</div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>Σ Final Amount (= 100 %)</div>
               </div>
-              <div style={{ padding: "20px 24px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>Pour Eqxia</div>
+              <div style={{ padding: "18px 24px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>− Commissions versées</div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
-                  <span style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)", letterSpacing: "-0.02em", fontFamily: "monospace" }}>{Math.round(cashData.eqxiaTotal).toLocaleString("fr-FR")}</span>
-                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>MUR</span>
-                </div>
-                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>{cashData.caTotal > 0 ? ((cashData.eqxiaTotal / cashData.caTotal) * 100).toFixed(1) : "0"} %</div>
-              </div>
-              <div style={{ padding: "20px 24px" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>Commissions versées</div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
-                  <span style={{ fontSize: 28, fontWeight: 800, color: "#f97316", letterSpacing: "-0.02em", fontFamily: "monospace" }}>{Math.round(cashData.commissionsTotal).toLocaleString("fr-FR")}</span>
-                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>MUR</span>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: "#f97316", fontFamily: "monospace" }}>−{Math.round(cashData.commissionsTotal).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
                 </div>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>{cashData.caTotal > 0 ? ((cashData.commissionsTotal / cashData.caTotal) * 100).toFixed(1) : "0"} % · {cashData.beneficiaires.length} bénéficiaire(s)</div>
+              </div>
+              <div style={{ padding: "18px 24px" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>= Revenu net</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: "var(--accent)", fontFamily: "monospace" }}>{Math.round(cashData.revenuNet).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
+                </div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>Ce qu'Eqxia conserve · {cashData.margeNettePct.toFixed(1)} % du CA</div>
+              </div>
+            </div>
+
+            {/* Ligne 2 : Charges & Marges */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 0 }}>
+              <div style={{ padding: "18px 24px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>− Dépenses</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: "#ef4444", fontFamily: "monospace" }}>−{Math.round(cashData.depAll).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
+                </div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>Tous postes · {depenses.length} dépense(s)</div>
+              </div>
+              <div style={{ padding: "18px 24px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>= Marge brute</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: cashData.margeBrute >= 0 ? "#22c55e" : "#ef4444", fontFamily: "monospace" }}>{Math.round(cashData.margeBrute).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
+                </div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>Revenu net − Dépenses</div>
+              </div>
+              <div style={{ padding: "18px 24px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>− Salaires</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: "#f97316", fontFamily: "monospace" }}>−{Math.round(cashData.salAll).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
+                </div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>Σ(CJE × 220/12) × mois</div>
+              </div>
+              <div style={{ padding: "18px 24px" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>= EBITDA</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: cashData.ebitda >= 0 ? "#22c55e" : "#ef4444", fontFamily: "monospace" }}>{Math.round(cashData.ebitda).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
+                </div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>Marge EBITDA : <span style={{ fontWeight: 700, color: cashData.margeEbitdaPct >= 0 ? "#22c55e" : "#ef4444", fontFamily: "monospace" }}>{cashData.margeEbitdaPct.toFixed(1)} %</span></div>
               </div>
             </div>
 
@@ -1903,7 +2013,7 @@ export default function DashboardPage() {
                         return (
                           <tr
                             key={p.id || i}
-                            onClick={() => setEditProject(p)}
+                            onClick={() => { setEditProjectMissing(missing); setEditProject(p) }}
                             style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }}
                             onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")}
                             onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
@@ -1972,7 +2082,8 @@ export default function DashboardPage() {
           project={editProject}
           clients={clients}
           employees={employees}
-          onClose={() => setEditProject(null)}
+          missing={editProjectMissing}
+          onClose={() => { setEditProject(null); setEditProjectMissing(undefined) }}
           onSave={handleSaveProject}
           saving={saving}
         />
@@ -2156,20 +2267,6 @@ function MonthDetailPanel({
   )
 }
 
-function FrozenBadge({ label, onClear }: { label: string; onClear: () => void }) {
-  return (
-    <div style={{
-      position: "absolute", top: 8, right: 8, zIndex: 4,
-      display: "flex", alignItems: "center", gap: 6,
-      background: "var(--accent-soft)", border: "1px solid var(--accent)",
-      color: "var(--accent)", padding: "4px 8px", borderRadius: 6,
-      fontSize: "var(--fs-2xs)", fontWeight: 600,
-    }}>
-      <span>📌 {label}</span>
-      <button onClick={onClear} title="Défiger (Échap)" style={{ background: "none", border: "none", color: "var(--accent)", cursor: "pointer", padding: 0, fontSize: 12, lineHeight: 1 }}>✕</button>
-    </div>
-  )
-}
 
 function TopBarTooltip({ active, payload, mode, types, typeColors }: any) {
   if (!active || !payload?.length) return null
@@ -2540,10 +2637,12 @@ function ChartCard({ title, value, sub, right, children, renderExpanded, expanda
 
 // ─── Modals ───────────────────────────────────────────────────────────────────
 
-function ProjectModal({ project, clients, employees, onClose, onSave, saving }: {
+function ProjectModal({ project, clients, employees, onClose, onSave, saving, missing }: {
   project: Project | null; clients: Client[]; employees: Employee[]; onClose: () => void; onSave: (data: any) => void; saving: boolean
+  missing?: string[] // labels des champs Critical manquants — met un ring rouge dessus
 }) {
   const isNew = !project
+  const [showAll, setShowAll] = useState(!missing) // Si missing défini : démarre en "essentiels"
   const [form, setForm] = useState({
     name: project?.name || "",
     status: project?.status || "Pending",
@@ -2566,6 +2665,13 @@ function ProjectModal({ project, clients, employees, onClose, onSave, saving }: 
   })
 
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }))
+  // Helper : retourne le style d'input enrichi avec un ring rouge si le label est dans missing
+  const inputStyleFor = (label: string): React.CSSProperties => {
+    if (missing && missing.includes(label)) {
+      return { ...fieldInput, borderColor: "#ef4444", boxShadow: "0 0 0 1px rgba(239,68,68,0.35)" }
+    }
+    return fieldInput
+  }
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
@@ -2575,36 +2681,55 @@ function ProjectModal({ project, clients, employees, onClose, onSave, saving }: 
 
   return (
     <div style={modalOverlay} onClick={onClose}>
-      <div style={modalBox} onClick={e => e.stopPropagation()}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
-          <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "var(--text-primary)" }}>
-            {isNew ? "Nouvelle vente" : "Modifier la vente"}
+      <div style={{ ...modalBox, maxWidth: 720 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "var(--text-primary)" }}>
+              {isNew ? "Nouvelle vente" : "Modifier la vente"}
+            </div>
+            {missing && missing.length > 0 && (
+              <div style={{ fontSize: "var(--fs-2xs)", color: "#ef4444", marginTop: 4, fontWeight: 600 }}>
+                Champs Critical manquants : {missing.join(" · ")}
+              </div>
+            )}
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18 }}>✕</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              onClick={() => setShowAll(s => !s)}
+              style={{ background: showAll ? "var(--accent-soft)" : "rgba(166,201,206,0.04)", border: `1px solid ${showAll ? "var(--accent)" : "var(--border-subtle)"}`, color: showAll ? "var(--accent)" : "var(--text-secondary)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "4px 10px", borderRadius: 6, fontFamily: "inherit", fontWeight: 600 }}
+            >
+              {showAll ? "Tous les champs ✓" : "Afficher tous les champs"}
+            </button>
+            <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18 }}>✕</button>
+          </div>
         </div>
+        <div style={{ borderTop: "1px solid var(--border-subtle)", marginBottom: 20 }} />
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <div style={{ gridColumn: "1 / -1" }}>
             <div style={fieldLabel}>Nom du projet</div>
-            <input value={form.name} onChange={e => set("name", e.target.value)} style={fieldInput} />
+            <input value={form.name} onChange={e => set("name", e.target.value)} style={inputStyleFor("Name")} />
           </div>
           <div style={{ gridColumn: "1 / -1" }}>
             <div style={fieldLabel}>Client</div>
-            <select value={form.clientIds} onChange={e => set("clientIds", e.target.value)} style={fieldInput}>
+            <select value={form.clientIds} onChange={e => set("clientIds", e.target.value)} style={inputStyleFor("Client")}>
               <option value="">— Aucun —</option>
               {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
           </div>
           <div>
             <div style={fieldLabel}>Owner</div>
-            <select value={form.ownerIds} onChange={e => set("ownerIds", e.target.value)} style={fieldInput}>
+            <select value={form.ownerIds} onChange={e => set("ownerIds", e.target.value)} style={inputStyleFor("Owner")}>
               <option value="">— Aucun —</option>
               {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
             </select>
           </div>
           <div>
             <div style={fieldLabel}>Phase</div>
-            <input value={form.phase} onChange={e => set("phase", e.target.value)} placeholder="ex: Discovery / Build / Handover" style={fieldInput} />
+            <select value={form.phase} onChange={e => set("phase", e.target.value)} style={inputStyleFor("Phase")}>
+              <option value="">— Aucune —</option>
+              {["Scoping", "Delivery", "Review", "Closed"].map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
           </div>
           <div style={{ gridColumn: "1 / -1" }}>
             <div style={fieldLabel}>Team Members <span style={{ color: "var(--text-muted)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>· à modifier directement dans Notion</span></div>
@@ -2620,63 +2745,70 @@ function ProjectModal({ project, clients, employees, onClose, onSave, saving }: 
           </div>
           <div>
             <div style={fieldLabel}>Status</div>
-            <select value={form.status} onChange={e => set("status", e.target.value)} style={fieldInput}>
+            <select value={form.status} onChange={e => set("status", e.target.value)} style={inputStyleFor("Status")}>
               {STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>
           <div>
             <div style={fieldLabel}>Type</div>
-            <select value={form.type} onChange={e => set("type", e.target.value)} style={fieldInput}>
+            <select value={form.type} onChange={e => set("type", e.target.value)} style={inputStyleFor("Type")}>
               {TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>
           <div>
             <div style={fieldLabel}>Méthodologie</div>
-            <select value={form.methodology} onChange={e => set("methodology", e.target.value)} style={fieldInput}>
+            <select value={form.methodology} onChange={e => set("methodology", e.target.value)} style={inputStyleFor("Methodology")}>
               <option value="">—</option>
               {METHODOLOGY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>
           <div>
             <div style={fieldLabel}>Devise</div>
-            <select value={form.currency} onChange={e => set("currency", e.target.value)} style={fieldInput}>
+            <select value={form.currency} onChange={e => set("currency", e.target.value)} style={inputStyleFor("Currency")}>
               {CURRENCY_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>
           <div>
             <div style={fieldLabel}>Montant devisé</div>
-            <input type="number" value={form.quotedAmount} onChange={e => set("quotedAmount", e.target.value)} style={fieldInput} />
+            <input type="number" value={form.quotedAmount} onChange={e => set("quotedAmount", e.target.value)} style={inputStyleFor("Quoted Amount")} />
           </div>
           <div>
             <div style={fieldLabel}>Montant final</div>
-            <input type="number" value={form.finalAmount} onChange={e => set("finalAmount", e.target.value)} style={fieldInput} />
+            <input type="number" value={form.finalAmount} onChange={e => set("finalAmount", e.target.value)} style={inputStyleFor("Final Amount")} />
           </div>
           <div>
             <div style={fieldLabel}>Win % (gut feeling)</div>
-            <input type="number" value={form.winPercent} onChange={e => set("winPercent", e.target.value)} style={fieldInput} min={0} max={100} />
+            <input type="number" value={form.winPercent} onChange={e => set("winPercent", e.target.value)} style={inputStyleFor("Win %")} min={0} max={100} />
           </div>
           <div>
             <div style={fieldLabel}>Niveau de risque</div>
-            <select value={form.riskLevel} onChange={e => set("riskLevel", e.target.value)} style={fieldInput}>
+            <select value={form.riskLevel} onChange={e => set("riskLevel", e.target.value)} style={inputStyleFor("Risk Level")}>
               <option value="">—</option>
               {RISK_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
             </select>
           </div>
           <div>
-            <div style={fieldLabel}>Satisfaction client</div>
-            <select value={form.clientSatisfaction} onChange={e => set("clientSatisfaction", e.target.value)} style={fieldInput}>
-              <option value="">—</option>
-              {SATISFACTION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-            </select>
-          </div>
-          <div>
             <div style={fieldLabel}>Date de début</div>
-            <input type="date" value={form.startDate} onChange={e => set("startDate", e.target.value)} style={fieldInput} />
+            <input type="date" value={form.startDate} onChange={e => set("startDate", e.target.value)} style={inputStyleFor("Start Date")} />
           </div>
           <div>
             <div style={fieldLabel}>Date de fin</div>
-            <input type="date" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={fieldInput} />
+            <input type="date" value={form.endDate} onChange={e => set("endDate", e.target.value)} style={inputStyleFor("End Date")} />
           </div>
+
+          {/* ── Champs additionnels (visible seulement en mode "tous les champs") ── */}
+          {showAll && <>
+            <div style={{ gridColumn: "1 / -1", borderTop: "1px solid var(--border-subtle)", paddingTop: 8, marginTop: 4 }}>
+              <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Champs additionnels</div>
+            </div>
+            <div>
+              <div style={fieldLabel}>Satisfaction client</div>
+              <select value={form.clientSatisfaction} onChange={e => set("clientSatisfaction", e.target.value)} style={fieldInput}>
+                <option value="">—</option>
+                {SATISFACTION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          </>}
           <div style={{ gridColumn: "1 / -1", borderTop: "1px solid var(--border-subtle)", paddingTop: 12, marginTop: 4 }}>
             <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 4 }}>Commission</div>
           </div>
@@ -2965,12 +3097,81 @@ function Badge({ c, l, v }: { c: string; l: string; v: string }) {
   return <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: c }} /><span style={{ color: "var(--text-muted)" }}>{l}</span><span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "monospace" }}>{v}</span></span>
 }
 
+// Bloc de contrôles Past/Future/Custom (utilisé par hero, revenus, charges)
+function ViewRangeToggle({ mode, setMode, past, setPast, future, setFuture, customStart, setCustomStart, customEnd, setCustomEnd, fyLabel }: {
+  mode: "past" | "future" | "custom"; setMode: (v: "past" | "future" | "custom") => void
+  past: "all" | "12m" | "6m" | "3m"; setPast: (v: "all" | "12m" | "6m" | "3m") => void
+  future: "12m" | "6m" | "3m"; setFuture: (v: "12m" | "6m" | "3m") => void
+  customStart: string; setCustomStart: (v: string) => void
+  customEnd: string; setCustomEnd: (v: string) => void
+  fyLabel?: string
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+      <Seg value={mode} onChange={v => setMode(v as any)} options={[["past", "Past"], ["future", "Future"], ["custom", "Custom"]]} />
+      {mode === "past" && (
+        <Seg value={past} onChange={v => setPast(v as any)} options={[["all", "All"], ["12m", "12m"], ["6m", "6m"], ["3m", "3m"]]} />
+      )}
+      {mode === "future" && (
+        <Seg value={future} onChange={v => setFuture(v as any)} options={[["12m", "12m"], ["6m", "6m"], ["3m", "3m"]]} />
+      )}
+      {mode === "custom" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "var(--fs-2xs)" }}>
+          <input type="month" value={customStart} onChange={e => setCustomStart(e.target.value)} style={{ padding: "3px 6px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit" }} />
+          <span style={{ color: "var(--text-muted)" }}>→</span>
+          <input type="month" value={customEnd} onChange={e => setCustomEnd(e.target.value)} style={{ padding: "3px 6px", fontSize: "var(--fs-2xs)", background: "rgba(166,201,206,0.06)", border: "1px solid rgba(166,201,206,0.12)", borderRadius: 4, color: "var(--text-primary)", fontFamily: "inherit" }} />
+          {(customStart || customEnd) && (
+            <button onClick={() => { setCustomStart(""); setCustomEnd("") }} style={{ background: "none", border: "1px solid var(--border-subtle)", color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "3px 6px", borderRadius: 4, fontFamily: "inherit" }}>
+              {fyLabel ? `FY ${fyLabel}` : "Reset"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function Seg({ value, onChange, options }: { value: string; onChange: (v: string) => void; options: readonly (readonly [string, string])[] }) {
   return (
     <div style={{ display: "flex", background: "rgba(166,201,206,0.06)", borderRadius: 6, overflow: "hidden", border: "1px solid rgba(166,201,206,0.10)" }}>
       {options.map(([val, label]) => (
         <button key={val} onClick={() => onChange(val)} style={{ padding: "3px 10px", fontSize: "var(--fs-2xs)", fontWeight: value === val ? 600 : 400, color: value === val ? "var(--text-primary)" : "var(--text-muted)", background: value === val ? "rgba(166,201,206,0.15)" : "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", transition: "all 0.15s" }}>{label}</button>
       ))}
+    </div>
+  )
+}
+
+function RentaTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null
+  const d = payload[0].payload
+  const typeColor = d.type ? undefined : "#A6C9CE"
+  return (
+    <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 12, padding: "12px 16px", boxShadow: "0 12px 40px rgba(0,0,0,0.5)", fontSize: "var(--fs-xs)", minWidth: 240, maxWidth: 320 }}>
+      <div style={{ fontWeight: 700, color: "var(--text-primary)", fontSize: "var(--fs-sm)", marginBottom: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name || "—"}</div>
+      {d.clientName && d.clientName !== "N/A" && (
+        <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginBottom: 8 }}>{d.clientName}</div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        {d.type && <span style={{ fontSize: "var(--fs-2xs)", padding: "2px 8px", borderRadius: 4, fontWeight: 600, background: `${typeColor || "var(--accent-soft)"}`, color: typeColor ? "#fff" : "var(--accent)" }}>{d.type}</span>}
+        {d.status && <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontStyle: "italic" }}>{d.status}</span>}
+        {d.risk && d.risk !== "Null" && <span style={{ fontSize: "var(--fs-2xs)", padding: "1px 6px", borderRadius: 3, fontWeight: 600, background: `${{ Low: "#22c55e", Medium: "#f97316", High: "#ef4444" }[d.risk as string] || "#6b7280"}22`, color: { Low: "#22c55e", Medium: "#f97316", High: "#ef4444" }[d.risk as string] || "#6b7280" }}>{d.risk}</span>}
+      </div>
+      <div style={{ borderTop: "1px solid rgba(166,201,206,0.10)", paddingTop: 6, marginTop: 6 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+          <span style={{ color: "var(--text-muted)" }}>Montant</span>
+          <span style={{ fontFamily: "monospace", fontWeight: 700, color: "var(--text-primary)" }}>{Math.round(d.x).toLocaleString("fr-FR")} MUR</span>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
+          <span style={{ color: "var(--text-muted)" }}>Rentabilité</span>
+          <span style={{ fontFamily: "monospace", fontWeight: 700, color: d.y >= 0 ? "#22c55e" : "#ef4444" }}>{d.y.toFixed(1)} %</span>
+        </div>
+        {d.finalAmount > 0 && (
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>
+            <span>Final Amount</span>
+            <span style={{ fontFamily: "monospace" }}>{Math.round(d.finalAmount).toLocaleString("fr-FR")} {d.currency}</span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
