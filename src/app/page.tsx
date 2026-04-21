@@ -77,11 +77,15 @@ function getCommissionRate(p: Project): number {
 }
 
 // ─── Définition UNIQUE du Revenu (utilisé partout) ─────────────────
-// Revenu = Net Amount = Final Amount − Commission (dans la devise du projet)
-// Fallback pour projets non encore réalisés : Quoted × Win% × (1 − commission%)
-// Permet de ne JAMAIS compter la part commission comme revenu Eqxia.
+// Revenu net = CA − Commission réellement versée (= si bénéficiaire + taux > 0)
+// Si aucun bénéficiaire défini OU taux à 0 → pas de commission soustraite.
+// Cohérent avec le bloc Cash & PNL.
+function hasRealCommission(p: Project): boolean {
+  const beneficiaire = (p.commissionTo || "").trim()
+  return !!beneficiaire && getCommissionRate(p) > 0
+}
 function getRevenueRaw(p: Project): number {
-  const commNet = 1 - getCommissionRate(p)
+  const commNet = hasRealCommission(p) ? (1 - getCommissionRate(p)) : 1
   if (p.finalAmount && p.finalAmount > 0) {
     return p.finalAmount * commNet
   }
@@ -93,7 +97,7 @@ function getCARaw(p: Project): number {
   return (p.quotedAmount || 0) * getWinRate(p)
 }
 function getCommissionRaw(p: Project): number {
-  return getCARaw(p) * getCommissionRate(p)
+  return hasRealCommission(p) ? getCARaw(p) * getCommissionRate(p) : 0
 }
 
 const getRevenueMUR = (p: Project): number => toMUR(getRevenueRaw(p), p.currency)
@@ -189,6 +193,12 @@ export default function DashboardPage() {
   const [depViewFuture, setDepViewFuture] = useState<"12m" | "6m" | "3m">("3m")
   const [depViewCustomStart, setDepViewCustomStart] = useState<string>("")
   const [depViewCustomEnd, setDepViewCustomEnd] = useState<string>("")
+  // Toggles pour le bloc Cash & PNL
+  const [cashViewMode, setCashViewMode] = useState<"past" | "future" | "custom">("past")
+  const [cashViewPast, setCashViewPast] = useState<"all" | "12m" | "6m" | "3m">("all")
+  const [cashViewFuture, setCashViewFuture] = useState<"12m" | "6m" | "3m">("3m")
+  const [cashViewCustomStart, setCashViewCustomStart] = useState<string>("")
+  const [cashViewCustomEnd, setCashViewCustomEnd] = useState<string>("")
   const [topMode, setTopMode] = useState<"clients" | "fournisseurs">("clients")
   const [tableMode, setTableMode] = useState<"ventes" | "depenses">("ventes")
 
@@ -923,7 +933,28 @@ export default function DashboardPage() {
   // EBITDA = Revenu net − Charges (dépenses + salaires opérationnels)
   // Marge EBITDA % = EBITDA / CA × 100
   const cashData = useMemo(() => {
-    const wonProjects = projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status))
+    // Construire la plage de mois selon cashView*
+    const existingMonths = [
+      ...new Set([
+        ...depenses.map(d => d.dossier).filter(Boolean),
+        ...projects.map(p => {
+          const iso = getRevenueDateISO(p); if (!iso) return ""
+          const d = new Date(iso)
+          return `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+        }).filter(Boolean),
+      ]),
+    ]
+    const codes = buildMonthCodes(cashViewMode, cashViewPast, cashViewFuture, cashViewCustomStart, cashViewCustomEnd, existingMonths)
+    const codeSet = new Set(codes)
+    const inRange = (code: string) => codeSet.has(code)
+
+    const wonProjects = projects.filter(p => {
+      if (!["Won", "Active", "Completed", "Won orally"].includes(p.status)) return false
+      const iso = getRevenueDateISO(p); if (!iso) return false
+      const d = new Date(iso)
+      const code = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+      return inRange(code)
+    })
     let caTotal = 0
     let revenuNet = 0
     let commissionsTotal = 0
@@ -958,19 +989,30 @@ export default function DashboardPage() {
       }))
       .sort((a, b) => b.total - a.total)
 
-    // Charges opérationnelles (toutes périodes confondues)
-    const depAll = depenses.reduce((s, d) => s + d.montantMUR, 0)
-    const salAll = salaireMensuel * computeSalariedMonths("all")
-    const chargesAll = depAll + salAll
+    // Charges dans la plage
+    const depPast = depenses.filter(d => d.dossier && inRange(d.dossier) && d.dossier <= currentDossier).reduce((s, d) => s + d.montantMUR, 0)
+    const nbFutureInRange = codes.filter(c => c > currentDossier).length
+    const depFuture = nbFutureInRange * recurringCriticalMensuel
+    const depTotalRange = depPast + depFuture
+    // Salaires : nb mois dans la plage qui sont >= 2603
+    const nbSalariedMonths = codes.filter(c => c >= "2603").length
+    const salTotalRange = salaireMensuel * nbSalariedMonths
+    const chargesRange = depTotalRange + salTotalRange
 
     // Indicateurs PNL
-    const margeBrute = revenuNet - depAll            // Revenu net − dépenses opérationnelles
-    const ebitda = revenuNet - chargesAll            // Revenu net − (dépenses + salaires)
+    const margeBrute = revenuNet - depTotalRange
+    const ebitda = revenuNet - chargesRange
     const margeEbitdaPct = caTotal > 0 ? (ebitda / caTotal) * 100 : 0
     const margeNettePct = caTotal > 0 ? (revenuNet / caTotal) * 100 : 0
 
-    return { caTotal, revenuNet, commissionsTotal, beneficiaires, depAll, salAll, chargesAll, margeBrute, ebitda, margeEbitdaPct, margeNettePct }
-  }, [projects, depenses, salaireMensuel, computeSalariedMonths])
+    const rangeInfo = {
+      nbPast: codes.filter(c => c <= currentDossier).length,
+      nbFuture: nbFutureInRange,
+      total: codes.length,
+    }
+
+    return { caTotal, revenuNet, commissionsTotal, beneficiaires, depAll: depTotalRange, salAll: salTotalRange, chargesAll: chargesRange, margeBrute, ebitda, margeEbitdaPct, margeNettePct, rangeInfo }
+  }, [projects, depenses, salaireMensuel, recurringCriticalMensuel, currentDossier, cashViewMode, cashViewPast, cashViewFuture, cashViewCustomStart, cashViewCustomEnd, buildMonthCodes])
 
   // Mois disponibles (décroissant) pour le filtre Date des Dernières ventes — format "YYYY-MM"
   // Basé sur End Date (= mois du revenu)
@@ -1935,12 +1977,24 @@ export default function DashboardPage() {
 
           {/* ── Cash / PNL ── */}
           <div style={{ ...card, marginTop: 24, padding: 0, overflow: "hidden" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)", flexWrap: "wrap", gap: 12 }}>
               <div>
                 <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>💵 Cash &amp; PNL</div>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>CA → Revenu net → Marge brute → EBITDA · basé sur toutes les périodes (all-time)</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>
+                  CA → Revenu net → Marge brute → EBITDA
+                  {cashData.rangeInfo.nbFuture > 0 && cashData.rangeInfo.nbPast > 0 && ` · ${cashData.rangeInfo.nbPast} passé${cashData.rangeInfo.nbPast > 1 ? "s" : ""} + ${cashData.rangeInfo.nbFuture} projeté${cashData.rangeInfo.nbFuture > 1 ? "s" : ""}`}
+                  {cashData.rangeInfo.nbFuture > 0 && cashData.rangeInfo.nbPast === 0 && ` · ${cashData.rangeInfo.nbFuture} mois projeté${cashData.rangeInfo.nbFuture > 1 ? "s" : ""}`}
+                  {cashData.rangeInfo.nbFuture === 0 && ` · ${cashData.rangeInfo.nbPast} mois`}
+                </div>
               </div>
-              <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).length} projet(s) Won/Active</div>
+              <ViewRangeToggle
+                mode={cashViewMode} setMode={setCashViewMode}
+                past={cashViewPast} setPast={setCashViewPast}
+                future={cashViewFuture} setFuture={setCashViewFuture}
+                customStart={cashViewCustomStart} setCustomStart={setCashViewCustomStart}
+                customEnd={cashViewCustomEnd} setCustomEnd={setCashViewCustomEnd}
+                fyLabel={fy.label}
+              />
             </div>
 
             {/* Ligne 1 : Revenus */}
