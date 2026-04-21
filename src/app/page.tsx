@@ -55,10 +55,12 @@ const RISK_COLORS: Record<string, string> = { Low: "#22c55e", Medium: "#f97316",
 const STATUS_OPTIONS = ["Won", "Won orally", "Active", "Completed", "Lost", "Cancelled", "Pending", "Proposal"]
 const TYPE_OPTIONS = ["Consulting", "Training", "Internal", "Workshop", "Product", "Advisory"]
 const METHODOLOGY_OPTIONS = ["Agile", "Waterfall", "Hybrid", "Ad-hoc"]
-// Taux de conversion vers MUR (utilisés pour Final Amount si Currency != MUR)
-const CURRENCY_RATES: Record<string, number> = { MUR: 1, EUR: 49, USD: 46, GBP: 57 }
+// Taux de conversion vers MUR — fallback statique (utilisé avant le fetch live)
+const CURRENCY_RATES_FALLBACK: Record<string, number> = { MUR: 1, EUR: 49, USD: 46, GBP: 57, KES: 0.35, ZAR: 2.5 }
+// Les taux sont injectés via le contexte React → toMUR lit depuis un global runtime
+let __LIVE_RATES__: Record<string, number> = { ...CURRENCY_RATES_FALLBACK }
 const toMUR = (amount: number, currency: string | undefined | null): number => {
-  const rate = CURRENCY_RATES[currency || "MUR"] ?? 1
+  const rate = __LIVE_RATES__[currency || "MUR"] ?? 1
   return (amount || 0) * rate
 }
 
@@ -161,6 +163,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [themeOpen, setThemeOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<"dashboard" | "previsionnel">("dashboard")
   const [bgImage, setBgImage] = useState(BG_IMAGES[0])
   const [timeRange, setTimeRange] = useState<"all" | "12m" | "6m" | "3m">("all")
   // Hero chart mode : Past (historique), Future (projection), Custom (plage libre)
@@ -224,6 +227,22 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  // Fetch taux de conversion live → MUR (EUR, USD, GBP, KES, ZAR)
+  const [rates, setRates] = useState<Record<string, number>>(CURRENCY_RATES_FALLBACK)
+  const [ratesUpdated, setRatesUpdated] = useState<string>("")
+  useEffect(() => {
+    fetch("/api/rates").then(r => r.json()).then(data => {
+      if (data?.rates) {
+        setRates(data.rates)
+        __LIVE_RATES__ = data.rates // injection globale pour toMUR()
+        setRatesUpdated(data.updated || "")
+        // Force recomputation des memos qui utilisent toMUR (projects / depenses déjà chargés avec fallback)
+        setProjects(prev => [...prev])
+        setDepenses(prev => [...prev])
+      }
+    }).catch(() => {})
+  }, [])
 
   // ─── Computed ───────────────────────────────────────────────────────────────
 
@@ -390,13 +409,12 @@ export default function DashboardPage() {
     return codes.map(dossier => {
       const isFuture = dossier > currentDossier
       const cats = m[dossier] || {}
-      // Futur : catégories = 0, salaires = valeur projetée ; on simule aussi les dépenses récurrentes critiques globales
       if (isFuture) {
         return {
           dossier,
           label: fmtDossier(dossier),
           Salaires: dossier >= SALAIRE_START_CODE ? salaireMensuel : 0,
-          __recurringCritical: recurringCriticalMensuel,
+          "Récurrent critique": recurringCriticalMensuel,
           isFuture: true,
         }
       }
@@ -763,31 +781,31 @@ export default function DashboardPage() {
       const commission = Math.max(0, ca - revNet)
       const dep = dM[m] || 0
       const sal = m >= SALAIRE_START_CODE ? salaireMensuel : 0
-      // Futur : dépenses = somme des Recurring Critical projetés (sans doublons)
       const depVal = isFuture ? recurringCriticalMensuel : dep
-      // EBITDA = Revenu net − Dépenses − Salaires (valide past et projeté)
       const ebitda = revNet - depVal - sal
+      // Passé inclut le mois courant ; Futur inclut aussi le mois courant → point partagé pour lisser la transition
+      const inPast = !isFuture
+      const inFuture = isFuture || isCurrent
       return {
         mois: m,
         label: fmtDossier(m),
         isFuture,
         isCurrent,
-        // Agrégés (tooltip)
         ca, revenus: revNet, commission, depenses: depVal, salaires: sal, ebitda,
-        // ── Passé (séries pleines) ──
-        caPast: isFuture ? null : ca,
-        revenuPast: isFuture ? null : revNet,
-        commissionPast: isFuture ? null : commission,
-        depensesPast: isFuture ? null : depVal,
-        salairesPast: isFuture ? null : sal,
-        ebitdaPast: isFuture ? null : ebitda,
-        // ── Futur / projeté (séries pointillées, couleurs atténuées) ──
-        caProjected: isFuture ? ca : null,
-        revenuProjected: isFuture ? revNet : null,
-        commissionProjected: isFuture ? commission : null,
-        depensesProjected: isFuture ? depVal : null,
-        salairesProjected: isFuture ? sal : null,
-        ebitdaProjected: isFuture ? ebitda : null,
+        // ── Passé (séries pleines) — jusqu'au mois courant inclus ──
+        caPast: inPast ? ca : null,
+        revenuPast: inPast ? revNet : null,
+        commissionPast: inPast ? commission : null,
+        depensesPast: inPast ? depVal : null,
+        salairesPast: inPast ? sal : null,
+        ebitdaPast: inPast ? ebitda : null,
+        // ── Futur / projeté — depuis le mois courant (point partagé) ──
+        caProjected: inFuture ? ca : null,
+        revenuProjected: inFuture ? revNet : null,
+        commissionProjected: inFuture ? commission : null,
+        depensesProjected: inFuture ? depVal : null,
+        salairesProjected: inFuture ? sal : null,
+        ebitdaProjected: inFuture ? ebitda : null,
       } as any
     })
   }, [depenses, projects, heroMode, heroPast, heroFuture, heroCustomStart, heroCustomEnd, currentDossier, fyStartYear, salaireMensuel, recurringCriticalMensuel])
@@ -1086,6 +1104,53 @@ export default function DashboardPage() {
 
           {error && <div style={{ ...card, background: "var(--btn-danger-bg)", border: "1px solid rgba(248,113,113,0.3)", color: "var(--color-error)", fontSize: "var(--fs-sm)", marginBottom: 16 }}>Erreur: {error}</div>}
 
+          {/* ── Tabs navigation ── */}
+          <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid var(--border-subtle)" }}>
+            {[["dashboard", "📊 Dashboard"], ["previsionnel", "🔮 Prévisionnel"]].map(([key, label]) => (
+              <button
+                key={key}
+                onClick={() => setActiveTab(key as any)}
+                style={{
+                  padding: "10px 20px",
+                  fontSize: "var(--fs-sm)",
+                  fontWeight: 600,
+                  fontFamily: "inherit",
+                  cursor: "pointer",
+                  border: "none",
+                  borderBottom: `2px solid ${activeTab === key ? "var(--accent)" : "transparent"}`,
+                  color: activeTab === key ? "var(--accent)" : "var(--text-secondary)",
+                  background: "none",
+                  marginBottom: -1,
+                  transition: "all 0.15s",
+                }}
+              >
+                {label}
+              </button>
+            ))}
+            <div style={{ flex: 1 }} />
+            {ratesUpdated && (
+              <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", alignSelf: "center", fontFamily: "monospace" }} title={`Taux mis à jour : ${ratesUpdated}`}>
+                💱 Taux live · USD {Math.round(rates.USD || 0)} · EUR {Math.round(rates.EUR || 0)} · GBP {Math.round(rates.GBP || 0)} MUR
+              </div>
+            )}
+          </div>
+
+          {activeTab === "previsionnel" ? (
+            <PrevisionnelView
+              heroData={heroData.filter(d => d.isFuture || d.isCurrent)}
+              projects={projects}
+              employees={employees}
+              depenses={depenses}
+              recurringCriticalMensuel={recurringCriticalMensuel}
+              salaireMensuel={salaireMensuel}
+              projectedTotals={{ ca: heroProjectedCA, rev: heroProjectedRev, dep: heroProjectedDep, sal: heroProjectedSal, ebitda: heroProjectedEbitda }}
+              onEditProject={(p: Project) => setEditProject(p)}
+              onEditDepense={(d: Depense) => setEditDepense(d)}
+              currentDossier={currentDossier}
+            />
+          ) : (
+          <>
+
           {/* ── KPIs ── */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
             {/* Revenus card with toggle */}
@@ -1236,6 +1301,9 @@ export default function DashboardPage() {
                           {chargesMode !== "salaires" && allCats.map((cat, i) => (
                             <Area key={cat} type="monotone" dataKey={cat} stackId="1" stroke={PIE_CAT[i % PIE_CAT.length]} strokeWidth={0.5} fill={`url(#gCatFs${i})`} />
                           ))}
+                          {chargesMode !== "salaires" && (
+                            <Area type="monotone" dataKey="Récurrent critique" stackId="1" stroke="#ef4444" strokeWidth={0.5} strokeDasharray="4 3" fill="#ef4444" fillOpacity={0.35} />
+                          )}
                           {currentDepMois && <ReferenceLine x={fmtDossier(currentDepMois)} stroke="rgba(166,201,206,0.4)" strokeWidth={1} strokeDasharray="3 3" />}
                         </AreaChart>
                       </ResponsiveContainer>
@@ -1355,6 +1423,9 @@ export default function DashboardPage() {
                     {chargesMode !== "salaires" && allCats.map((cat, i) => (
                       <Area key={cat} type="monotone" dataKey={cat} stackId="1" stroke={PIE_CAT[i % PIE_CAT.length]} strokeWidth={0.5} fill={`url(#gCat${i})`} />
                     ))}
+                    {chargesMode !== "salaires" && (
+                      <Area type="monotone" dataKey="Récurrent critique" stackId="1" stroke="#ef4444" strokeWidth={0.5} strokeDasharray="4 3" fill="#ef4444" fillOpacity={0.35} />
+                    )}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -1362,18 +1433,29 @@ export default function DashboardPage() {
 
             <ChartCard
               title="Dépenses par catégorie"
-              sub={depParCatMeta.nbFuture > 0 ? (depParCatMeta.nbPast > 0 ? `Plage : ${depParCatMeta.nbPast} mois passé + ${depParCatMeta.nbFuture} mois projeté` : `Plage : ${depParCatMeta.nbFuture} mois projeté`) : `Plage : ${depParCatMeta.nbPast} mois`}
+              sub={(() => {
+                const pluralize = (n: number, s: string) => `${n} ${s}${n > 1 ? "s" : ""}`
+                if (depParCatMeta.nbFuture > 0 && depParCatMeta.nbPast > 0) return `Plage : ${pluralize(depParCatMeta.nbPast, "passé")} + ${pluralize(depParCatMeta.nbFuture, "projeté")}`
+                if (depParCatMeta.nbFuture > 0) return `Plage : ${pluralize(depParCatMeta.nbFuture, "mois projeté")}`
+                return `Plage : ${pluralize(depParCatMeta.nbPast, "mois")}`
+              })()}
               expandable
               expandMode="tall"
-              renderExpanded={() => (
-                <BigPie
-                  data={depParCat}
-                  colors={depParCat.map((_, i) => PIE_CAT[i % PIE_CAT.length])}
-                  total={depTotalAll}
-                  totalLabel="Dépenses totales"
-                  formatter={v => `${Math.round(v).toLocaleString("fr-FR")} MUR`}
-                />
-              )}
+              renderExpanded={() => {
+                const realT = depParCat.filter((d: any) => !d.projected).reduce((s, d) => s + d.value, 0)
+                const projT = depParCat.filter((d: any) => d.projected).reduce((s, d) => s + d.value, 0)
+                return (
+                  <BigPie
+                    data={depParCat}
+                    colors={depParCat.map((d: any, i) => d.projected ? "#ef4444" : PIE_CAT[i % PIE_CAT.length])}
+                    total={realT + projT}
+                    totalLabel="Dépenses totales"
+                    formatter={v => `${Math.round(v).toLocaleString("fr-FR")} MUR`}
+                    realTotal={realT}
+                    projectedTotal={projT}
+                  />
+                )
+              }}
             >
               <ResponsiveContainer width="100%" height={320}>
                 <PieChart>
@@ -1607,19 +1689,34 @@ export default function DashboardPage() {
 
             <ChartCard
               title="Revenus par type de projet"
-              sub={projParTypeMeta.nbFuture > 0 ? (projParTypeMeta.nbPast > 0 ? `Plage : ${projParTypeMeta.nbPast} passé + ${projParTypeMeta.nbFuture} projeté` : `Plage : ${projParTypeMeta.nbFuture} mois projeté`) : `Plage : ${projParTypeMeta.nbPast} mois`}
+              sub={(() => {
+                const pluralize = (n: number, s: string) => `${n} ${s}${n > 1 ? "s" : ""}`
+                if (projParTypeMeta.nbFuture > 0 && projParTypeMeta.nbPast > 0) return `Plage : ${pluralize(projParTypeMeta.nbPast, "passé")} + ${pluralize(projParTypeMeta.nbFuture, "projeté")}`
+                if (projParTypeMeta.nbFuture > 0) return `Plage : ${pluralize(projParTypeMeta.nbFuture, "mois projeté")}`
+                return `Plage : ${pluralize(projParTypeMeta.nbPast, "mois")}`
+              })()}
               expandable
               expandMode="tall"
-              renderExpanded={() => (
-                <BigPie
-                  data={projParTypeFiltered}
-                  colors={projParTypeFiltered.map((_, i) => PIE_TYPE[i % PIE_TYPE.length])}
-                  total={projParTypeFiltered.reduce((s, e) => s + e.amount, 0)}
-                  totalLabel="Revenus totaux"
-                  formatter={v => `${Math.round(v).toLocaleString("fr-FR")} MUR`}
-                  double
-                />
-              )}
+              renderExpanded={() => {
+                const realT = projParTypeFiltered.reduce((s, e: any) => s + (e.realAmount || 0), 0)
+                const projT = projParTypeFiltered.reduce((s, e: any) => s + (e.projectedAmount || 0), 0)
+                const realC = projParTypeFiltered.reduce((s, e: any) => s + (e.realCount || 0), 0)
+                const projC = projParTypeFiltered.reduce((s, e: any) => s + (e.projectedCount || 0), 0)
+                return (
+                  <BigPie
+                    data={projParTypeFiltered}
+                    colors={projParTypeFiltered.map((_, i) => PIE_TYPE[i % PIE_TYPE.length])}
+                    total={realT + projT}
+                    totalLabel="Revenus totaux"
+                    formatter={v => `${Math.round(v).toLocaleString("fr-FR")} MUR`}
+                    double
+                    realTotal={realT}
+                    projectedTotal={projT}
+                    realCount={realC}
+                    projectedCount={projC}
+                  />
+                )
+              }}
             >
               <div style={{ position: "relative" }}>
                 <ResponsiveContainer width="100%" height={320}>
@@ -2075,6 +2172,8 @@ export default function DashboardPage() {
           </div>
 
           <div style={{ textAlign: "center", padding: "12px 0 24px", color: "var(--text-muted)", fontSize: "var(--fs-2xs)" }}>{projects.length} projets · {depenses.length} dépenses · {employees.length} employés · Données Notion en temps réel</div>
+          </>
+          )}
         </main>
       </div>
 
@@ -2394,17 +2493,23 @@ function TopDetailView({ mode, clients, fournisseurs, onSelectItem }: {
   )
 }
 
-function BigPie({ data, colors, total, totalLabel, formatter, double }: {
-  data: { name: string; value?: number; amount?: number; count?: number }[]
+function BigPie({ data, colors, total, totalLabel, formatter, double, realTotal, projectedTotal, realCount, projectedCount }: {
+  data: { name: string; value?: number; amount?: number; count?: number; projected?: number }[]
   colors: string[]
   total?: number
   totalLabel?: string
   formatter: (v: number) => string
   double?: boolean
+  realTotal?: number
+  projectedTotal?: number
+  realCount?: number
+  projectedCount?: number
 }) {
   const getValue = (d: any) => d.value ?? d.amount ?? 0
   const sum = total ?? data.reduce((s, d) => s + getValue(d), 0)
   const totalCount = double ? data.reduce((s, d: any) => s + (d.count || 0), 0) : 0
+  const hasMix = (projectedTotal || 0) > 0 && (realTotal || 0) > 0
+  const hasMixCount = (projectedCount || 0) > 0 && (realCount || 0) > 0
 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: 24, height: "100%", alignItems: "center" }}>
@@ -2473,15 +2578,22 @@ function BigPie({ data, colors, total, totalLabel, formatter, double }: {
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: "var(--fs-sm)", color: "var(--text-primary)", fontWeight: 700 }}>
               {double ? "Tous les projets" : "Total"}
+              {hasMix && <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 500, marginLeft: 6 }}>(actuels + proj)</span>}
             </div>
             {double && (
               <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 2 }}>
                 {totalCount} projets
+                {hasMixCount && <span style={{ marginLeft: 4 }}>({realCount} A + {projectedCount} P)</span>}
               </div>
             )}
           </div>
           <div style={{ textAlign: "right", flexShrink: 0 }}>
             <div style={{ fontSize: "var(--fs-sm)", fontWeight: 800, fontFamily: "monospace", color: "var(--accent)" }}>{formatter(sum)}</div>
+            {hasMix && (
+              <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontFamily: "monospace" }}>
+                {formatter(realTotal || 0)} A + {formatter(projectedTotal || 0)} P
+              </div>
+            )}
             <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontFamily: "monospace" }}>100%</div>
           </div>
         </div>
@@ -3124,29 +3236,234 @@ function Badge({ c, l, v }: { c: string; l: string; v: string }) {
   return <span style={{ display: "flex", alignItems: "center", gap: 4 }}><span style={{ width: 8, height: 8, borderRadius: "50%", background: c }} /><span style={{ color: "var(--text-muted)" }}>{l}</span><span style={{ fontWeight: 700, color: "var(--text-primary)", fontFamily: "monospace" }}>{v}</span></span>
 }
 
+// ───────── Onglet Prévisionnel : charts futurs + listings modifiables ─────────
+function PrevisionnelView({ heroData, projects, employees, depenses, recurringCriticalMensuel, salaireMensuel, projectedTotals, onEditProject, onEditDepense, currentDossier }: any) {
+  // Futur = mois > currentDossier
+  const futureProjects = projects.filter((p: Project) => {
+    const iso = p.endDate || p.startDate
+    if (!iso) return false
+    const d = new Date(iso)
+    const code = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+    return code > currentDossier && getRevenueRaw(p) > 0
+  }).sort((a: Project, b: Project) => (a.endDate || a.startDate).localeCompare(b.endDate || b.startDate))
+  const recurringList = depenses.filter((d: Depense) => d.recurringCritical)
+  const salaryLines = employees.filter((e: Employee) => e.cje > 0)
+
+  const totalCA = projectedTotals.ca
+  const totalRev = projectedTotals.rev
+  const totalDep = projectedTotals.dep
+  const totalSal = projectedTotals.sal
+  const totalEbitda = projectedTotals.ebitda
+
+  return (
+    <div>
+      {/* Header explicatif */}
+      <div style={{ ...card, marginBottom: 16, padding: "16px 20px" }}>
+        <div style={{ fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-primary)" }}>🔮 Prévisionnel</div>
+        <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 4 }}>
+          Projections basées sur les projets futurs (pondérés Win %), salaires constants et dépenses récurrentes critiques.
+        </div>
+      </div>
+
+      {/* KPIs projetés */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 20 }}>
+        {[
+          { label: "CA projeté", val: totalCA, color: "#3D8899", formula: "Σ Quoted × Win% OU Σ Final Amount" },
+          { label: "Revenu projeté", val: totalRev, color: "#A6C9CE", formula: "CA × (1 − commission%)" },
+          { label: "Dépenses proj.", val: totalDep, color: "#ef4444", formula: "Σ Recurring Critical × nb mois" },
+          { label: "Salaires proj.", val: totalSal, color: "#f97316", formula: "Σ(CJE × 220/12) × nb mois" },
+          { label: "EBITDA projeté", val: totalEbitda, color: totalEbitda >= 0 ? "#22c55e" : "#ef4444", formula: "Revenu − Dépenses − Salaires" },
+        ].map(k => (
+          <div key={k.label} style={{ ...card, padding: "14px 16px" }}>
+            <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>{k.label}</div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: k.color, fontFamily: "monospace", marginTop: 6 }}>{Math.round(k.val).toLocaleString("fr-FR")}</div>
+            <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4, fontStyle: "italic" }}>{k.formula}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Chart futur — stacked areas */}
+      <div style={{ ...card, marginBottom: 16, padding: 0, overflow: "hidden" }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid rgba(166,201,206,0.08)", fontSize: "var(--fs-md)", fontWeight: 600 }}>Évolution mensuelle projetée</div>
+        <div style={{ padding: 16 }}>
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={heroData}>
+              <defs>
+                <linearGradient id="gRevPv" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#A6C9CE" stopOpacity={0.4} /><stop offset="95%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient>
+                <linearGradient id="gSalPv" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#f97316" stopOpacity={0.4} /><stop offset="95%" stopColor="#f97316" stopOpacity={0.02} /></linearGradient>
+                <linearGradient id="gDepPv" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ef4444" stopOpacity={0.35} /><stop offset="95%" stopColor="#ef4444" stopOpacity={0.02} /></linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+              <ReferenceLine y={0} stroke="rgba(255,255,255,0.35)" strokeWidth={1} ifOverflow="extendDomain" {...({ isFront: false } as any)} />
+              <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />
+              <Tooltip content={<HeroTooltip />} />
+              <Area type="monotone" dataKey="salairesProjected" stackId="c" stroke="#f97316" strokeWidth={2} fill="url(#gSalPv)" connectNulls />
+              <Area type="monotone" dataKey="depensesProjected" stackId="c" stroke="#ef4444" strokeWidth={2} fill="url(#gDepPv)" connectNulls />
+              <Area type="monotone" dataKey="revenuProjected" stroke="#A6C9CE" strokeWidth={2} fill="url(#gRevPv)" connectNulls />
+              <Line type="monotone" dataKey="caProjected" stroke="#3D8899" strokeWidth={2} dot={false} connectNulls />
+              <Line type="monotone" dataKey="ebitdaProjected" stroke="#22c55e" strokeWidth={2} dot={false} connectNulls />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Ventes futures */}
+      <div style={{ ...card, marginBottom: 16, padding: 0, overflow: "hidden" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(166,201,206,0.08)", fontSize: "var(--fs-md)", fontWeight: 600 }}>
+          Ventes futures (pondérées Win%) <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: "var(--fs-xs)", marginLeft: 6 }}>{futureProjects.length} projet(s)</span>
+        </div>
+        {futureProjects.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontStyle: "italic" }}>Aucune vente future</div>
+        ) : (
+          <div style={{ maxHeight: 340, overflowY: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+              <thead style={{ position: "sticky", top: 0, background: "var(--bg-panel)", zIndex: 2 }}>
+                <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                  {["End Date", "Projet", "Client", "Type", "Status", "Quoted", "Win%", "Commission%", "CA proj.", "Revenu proj."].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {futureProjects.map((p: Project, i: number) => {
+                  const win = p.winPercent && p.winPercent > 1 ? p.winPercent / 100 : (p.winPercent || 0)
+                  const com = p.commissionPercent && p.commissionPercent > 1 ? p.commissionPercent / 100 : (p.commissionPercent || 0)
+                  const ca = getCAMUR(p)
+                  const rev = getRevenueMUR(p)
+                  return (
+                    <tr key={p.id || i} onClick={() => onEditProject(p)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{p.endDate || p.startDate || "—"}</td>
+                      <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</td>
+                      <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName || "—"}</td>
+                      <td style={tdStyle}>{p.type || "—"}</td>
+                      <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status || "—"}</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace" }}>{Math.round(p.quotedAmount).toLocaleString("fr-FR")} {p.currency}</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--accent)" }}>{(win * 100).toFixed(0)}%</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "#f97316" }}>{(com * 100).toFixed(0)}%</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "#3D8899" }}>{Math.round(ca).toLocaleString("fr-FR")}</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "#A6C9CE" }}>{Math.round(rev).toLocaleString("fr-FR")}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Salaires */}
+      <div style={{ ...card, marginBottom: 16, padding: 0, overflow: "hidden" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(166,201,206,0.08)", fontSize: "var(--fs-md)", fontWeight: 600 }}>
+          Salaires mensuels <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: "var(--fs-xs)", marginLeft: 6 }}>{salaryLines.length} employé(s) · total/mois : {Math.round(salaireMensuel).toLocaleString("fr-FR")} MUR</span>
+        </div>
+        {salaryLines.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontStyle: "italic" }}>Aucun salaire configuré</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+            <thead>
+              <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                {["Employé", "Rôle", "CJE", "Mensuel (× 220/12)"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {salaryLines.map((e: Employee) => (
+                <tr key={e.id} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)" }}>
+                  <td style={{ ...tdStyle, fontWeight: 500 }}>{e.name}</td>
+                  <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{e.role || "—"}</td>
+                  <td style={{ ...tdStyle, fontFamily: "monospace" }}>{Math.round(e.cje).toLocaleString("fr-FR")} MUR/j</td>
+                  <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "#f97316" }}>{Math.round(e.cje * 220 / 12).toLocaleString("fr-FR")} MUR</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Dépenses récurrentes critiques */}
+      <div style={{ ...card, marginBottom: 16, padding: 0, overflow: "hidden" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(166,201,206,0.08)", fontSize: "var(--fs-md)", fontWeight: 600 }}>
+          Dépenses récurrentes critiques <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: "var(--fs-xs)", marginLeft: 6 }}>{recurringList.length} dépense(s) · projection/mois : {Math.round(recurringCriticalMensuel).toLocaleString("fr-FR")} MUR</span>
+        </div>
+        {recurringList.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontStyle: "italic" }}>Aucune dépense flaguée "Recurring Critical"</div>
+        ) : (
+          <div style={{ maxHeight: 280, overflowY: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+              <thead style={{ position: "sticky", top: 0, background: "var(--bg-panel)", zIndex: 2 }}>
+                <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                  {["Dernière date", "Description", "Fournisseur", "Catégorie", "Montant (MUR)"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {recurringList.map((d: Depense, i: number) => (
+                  <tr key={d.id || i} onClick={() => onEditDepense(d)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                    <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{d.date || "—"}</td>
+                    <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.description}</td>
+                    <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{d.fournisseur || "—"}</td>
+                    <td style={tdStyle}>{d.categorie || "—"}</td>
+                    <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "#ef4444" }}>{Math.round(d.montantMUR).toLocaleString("fr-FR")}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ───────── Finance Dashboard (hero) ─────────
 // Séries rendues (identifiants = clés de toggle dans hidden) :
 //  Actuels (pleins) : CA (line), Revenu (area), Dépenses (area stack), Salaires (area stack base), EBITDA (line)
 //  Projetés (pointillés) : identiques mais suffixés "-projected"
+// Ordre légende : CA, Revenu, EBITDA, Dépenses, Salaires
 const HERO_SERIES_ACTUAL = [
-  { key: "revenu", label: "Revenu", color: "#A6C9CE", type: "area" },
   { key: "ca", label: "CA", color: "#3D8899", type: "line" },
+  { key: "revenu", label: "Revenu", color: "#A6C9CE", type: "area" },
+  { key: "ebitda", label: "EBITDA", color: "#22c55e", type: "line" },
   { key: "depenses", label: "Dépenses", color: "#ef4444", type: "area" },
   { key: "salaires", label: "Salaires", color: "#f97316", type: "area" },
-  { key: "ebitda", label: "EBITDA", color: "#22c55e", type: "line" },
 ] as const
 const HERO_SERIES_PROJECTED = [
-  { key: "revenu-p", label: "Revenu proj.", color: "#A6C9CE", type: "area" },
   { key: "ca-p", label: "CA proj.", color: "#3D8899", type: "line" },
+  { key: "revenu-p", label: "Revenu proj.", color: "#A6C9CE", type: "area" },
+  { key: "ebitda-p", label: "EBITDA proj.", color: "#22c55e", type: "line" },
   { key: "depenses-p", label: "Dépenses proj.", color: "#ef4444", type: "area" },
   { key: "salaires-p", label: "Salaires proj.", color: "#f97316", type: "area" },
-  { key: "ebitda-p", label: "EBITDA proj.", color: "#22c55e", type: "line" },
 ] as const
 
 function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPast, heroFuture, setHeroFuture, heroCustomStart, setHeroCustomStart, heroCustomEnd, setHeroCustomEnd, hidden, toggleHidden, fullscreen, setFullscreen, totals, projected, fyLabel }: any) {
   const showSeries = (key: string) => !hidden.has(key)
+  const [chartType, setChartType] = useState<"area" | "bar">("area")
 
-  const renderChart = (height: number | string) => (
+  const renderChart = (height: number | string) => {
+    if (chartType === "bar") {
+      // Mode histogramme : barres groupées pour chaque métrique visible
+      return (
+        <ResponsiveContainer width="100%" height={height as any}>
+          <BarChart data={heroData} margin={{ left: 10, right: 10 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.06)" />
+            <ReferenceLine y={0} stroke="rgba(255,255,255,0.35)" strokeWidth={1} ifOverflow="extendDomain" {...({ isFront: false } as any)} />
+            <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />
+            <Tooltip content={<HeroTooltip />} />
+            {/* Actuels (solides) */}
+            {showSeries("ca") && <Bar dataKey="caPast" fill="#3D8899" />}
+            {showSeries("revenu") && <Bar dataKey="revenuPast" fill="#A6C9CE" />}
+            {showSeries("ebitda") && <Bar dataKey="ebitdaPast" fill="#22c55e" />}
+            {showSeries("depenses") && <Bar dataKey="depensesPast" fill="#ef4444" />}
+            {showSeries("salaires") && <Bar dataKey="salairesPast" fill="#f97316" />}
+            {/* Projetés (opacité réduite) */}
+            {showSeries("ca-p") && <Bar dataKey="caProjected" fill="#3D8899" fillOpacity={0.4} />}
+            {showSeries("revenu-p") && <Bar dataKey="revenuProjected" fill="#A6C9CE" fillOpacity={0.4} />}
+            {showSeries("ebitda-p") && <Bar dataKey="ebitdaProjected" fill="#22c55e" fillOpacity={0.4} />}
+            {showSeries("depenses-p") && <Bar dataKey="depensesProjected" fill="#ef4444" fillOpacity={0.4} />}
+            {showSeries("salaires-p") && <Bar dataKey="salairesProjected" fill="#f97316" fillOpacity={0.4} />}
+          </BarChart>
+        </ResponsiveContainer>
+      )
+    }
+    return (
     <ResponsiveContainer width="100%" height={height as any}>
       <AreaChart data={heroData} margin={{ left: 10, right: 10 }}>
         <defs>
@@ -3173,7 +3490,8 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
         {showSeries("ebitda-p") && <Line type="monotone" dataKey="ebitdaProjected" stroke="#22c55e" strokeWidth={2} strokeDasharray="5 4" dot={false} activeDot={{ r: 4, fill: "#22c55e", strokeWidth: 0 }} connectNulls={false} />}
       </AreaChart>
     </ResponsiveContainer>
-  )
+    )
+  }
 
   const renderLegend = () => (
     <div style={{ padding: "12px 20px", borderTop: "1px solid rgba(166,201,206,0.08)" }}>
@@ -3251,7 +3569,12 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
         <div style={{ background: "var(--bg-panel)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", border: "1px solid rgba(166,201,206,0.10)", borderRadius: 14, width: "95vw", height: "92vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }} onClick={e => e.stopPropagation()}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
             <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "var(--text-primary)" }}>Finance Dashboard</div>
-            <button onClick={() => setFullscreen(false)} title="Réduire" style={{ background: "none", border: "1px solid var(--border-subtle)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>✕</button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => setChartType(t => t === "area" ? "bar" : "area")} title={chartType === "area" ? "Vue histogramme" : "Vue courbes"} style={{ background: chartType === "bar" ? "var(--accent-soft)" : "none", border: `1px solid ${chartType === "bar" ? "var(--accent)" : "var(--border-subtle)"}`, borderRadius: 6, color: chartType === "bar" ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>
+                {chartType === "area" ? "📊" : "📈"}
+              </button>
+              <button onClick={() => setFullscreen(false)} title="Réduire" style={{ background: "none", border: "1px solid var(--border-subtle)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>✕</button>
+            </div>
           </div>
           {body}
         </div>
@@ -3264,11 +3587,18 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>Finance Dashboard</div>
-          <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>
-            CA &gt; Revenu (net commission) · Charges = Salaires + Dépenses · EBITDA = Revenu − Charges
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4, fontFamily: "monospace" }}>
+            <span><span style={{ color: "var(--text-muted)" }}>Total </span><span style={{ color: "#3D8899", fontWeight: 700 }}>CA</span> = <span style={{ color: "var(--text-primary)" }}>{Math.round(totals.ca + projected.ca).toLocaleString("fr-FR")}</span> <span style={{ color: "var(--text-muted)" }}>({Math.round(totals.ca).toLocaleString("fr-FR")} A + {Math.round(projected.ca).toLocaleString("fr-FR")} P)</span></span>
+            <span><span style={{ color: "#A6C9CE", fontWeight: 700 }}>Revenu</span> = <span style={{ color: "var(--text-primary)" }}>{Math.round(totals.rev + projected.rev).toLocaleString("fr-FR")}</span> <span style={{ color: "var(--text-muted)" }}>({Math.round(totals.rev).toLocaleString("fr-FR")} A + {Math.round(projected.rev).toLocaleString("fr-FR")} P)</span></span>
+            <span><span style={{ color: "#22c55e", fontWeight: 700 }}>EBITDA</span> = <span style={{ color: "var(--text-primary)" }}>{Math.round(totals.ebitda + projected.ebitda).toLocaleString("fr-FR")}</span> <span style={{ color: "var(--text-muted)" }}>({Math.round(totals.ebitda).toLocaleString("fr-FR")} A + {Math.round(projected.ebitda).toLocaleString("fr-FR")} P)</span></span>
           </div>
         </div>
-        <button onClick={() => setFullscreen(true)} title="Agrandir" style={{ background: "none", border: "1px solid var(--border-subtle)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>⛶</button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => setChartType(t => t === "area" ? "bar" : "area")} title={chartType === "area" ? "Vue histogramme" : "Vue courbes"} style={{ background: chartType === "bar" ? "var(--accent-soft)" : "none", border: `1px solid ${chartType === "bar" ? "var(--accent)" : "var(--border-subtle)"}`, borderRadius: 6, color: chartType === "bar" ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>
+            {chartType === "area" ? "📊" : "📈"}
+          </button>
+          <button onClick={() => setFullscreen(true)} title="Agrandir" style={{ background: "none", border: "1px solid var(--border-subtle)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>⛶</button>
+        </div>
       </div>
       {body}
     </div>
