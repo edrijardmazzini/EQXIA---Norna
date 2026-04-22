@@ -1137,6 +1137,12 @@ export default function DashboardPage() {
                   {now.toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" })}
                 </div>
               </div>
+              <a
+                href="/sales"
+                style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", textDecoration: "none", padding: "4px 10px", borderRadius: "var(--radius-btn)", border: "1px solid var(--border-subtle)", background: "var(--accent-soft)", whiteSpace: "nowrap" }}
+              >
+                Sales →
+              </a>
               <SignOutButton />
             </div>
           }
