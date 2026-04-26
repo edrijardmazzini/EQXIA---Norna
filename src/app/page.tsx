@@ -62,8 +62,17 @@ const METHODOLOGY_OPTIONS = ["Agile", "Waterfall", "Hybrid", "Ad-hoc"]
 const CURRENCY_RATES_FALLBACK: Record<string, number> = { MUR: 1, EUR: 49, USD: 46, GBP: 57, KES: 0.35, ZAR: 2.5 }
 // Les taux sont injectés via le contexte React → toMUR lit depuis un global runtime
 let __LIVE_RATES__: Record<string, number> = { ...CURRENCY_RATES_FALLBACK }
-const toMUR = (amount: number, currency: string | undefined | null): number => {
-  const rate = __LIVE_RATES__[currency || "MUR"] ?? 1
+// Conversion en MUR. Si dateISO fourni ET un historique existe pour la devise,
+// on utilise le taux historique à cette date (le plus proche ≤ dateISO).
+// Sinon fallback sur le taux live (__LIVE_RATES__).
+const toMUR = (amount: number, currency: string | undefined | null, dateISO?: string): number => {
+  const cur = currency || "MUR"
+  if (cur === "MUR") return amount || 0
+  if (dateISO) {
+    const histRate = rateAtDate(cur, dateISO)
+    if (histRate) return (amount || 0) * histRate
+  }
+  const rate = __LIVE_RATES__[cur] ?? 1
   return (amount || 0) * rate
 }
 
@@ -74,9 +83,15 @@ type SettingsWinPref = "gut-then-auto" | "auto-then-gut" | "gut-only" | "auto-on
 interface RuntimeSettings {
   dateField: SettingsDateField
   winPref: SettingsWinPref
+  /** Champ utilisé pour récupérer le taux historique de conversion. */
+  conversionDateField: SettingsDateField
 }
 
-let __SETTINGS__: RuntimeSettings = { dateField: "endDate", winPref: "gut-then-auto" }
+let __SETTINGS__: RuntimeSettings = {
+  dateField: "endDate",
+  winPref: "gut-then-auto",
+  conversionDateField: "endDate",
+}
 
 function applySettings(s: Partial<RuntimeSettings>): void {
   __SETTINGS__ = { ...__SETTINGS__, ...s }
@@ -91,10 +106,34 @@ function loadSettingsFromStorage(): RuntimeSettings {
     return {
       dateField: parsed.dateField ?? "endDate",
       winPref: parsed.winPref ?? "gut-then-auto",
+      conversionDateField: parsed.conversionDateField ?? "endDate",
     }
   } catch {
     return __SETTINGS__
   }
+}
+
+// ─── Taux historiques (chargés au mount, par /api/rates/history) ──────────────
+// Format : { "EUR": [{ date: "2026-04-15", rate: 49.2 }, ...], ... }
+// Trié ascendant par date côté API. Lookup binaire par scan linéaire.
+type RateHistoryPoint = { date: string; rate: number }
+let __HISTORY__: Record<string, RateHistoryPoint[]> = {}
+
+function applyHistory(h: Record<string, RateHistoryPoint[]>): void {
+  __HISTORY__ = h
+}
+
+/** Trouve le taux le plus proche (≤ dateISO) dans la série de la devise. */
+function rateAtDate(currency: string, dateISO: string): number | null {
+  const series = __HISTORY__[currency]
+  if (!series || series.length === 0) return null
+  let best: RateHistoryPoint | null = null
+  for (const p of series) {
+    if (p.date <= dateISO) best = p
+    else break
+  }
+  if (!best) best = series[0] // dateISO antérieur à toute la série → on prend le plus ancien
+  return best.rate > 0 ? best.rate : null
 }
 
 // Helpers : Win % et Commission % normalisés (0-1)
@@ -228,12 +267,20 @@ function computeProjectRevenue(p: Project, now: Date = new Date()): ProjectReven
   const commissionRaw = hasRealCommission(p) ? caRaw * getCommissionRate(p) : 0
   const netRaw = caRaw - commissionRaw
 
+  // Date utilisée pour le taux de conversion historique (cf __SETTINGS__.conversionDateField).
+  // Fallback sur endDate si le champ choisi est vide pour ce projet.
+  const conversionDate =
+    (__SETTINGS__.conversionDateField === "startDate" ? p.startDate : null) ||
+    (__SETTINGS__.conversionDateField === "decisionDate" ? projectAny.decisionDate : null) ||
+    p.endDate ||
+    ""
+
   return {
     kind,
     caRaw, commissionRaw, netRaw,
-    caMUR: toMUR(caRaw, p.currency),
-    commissionMUR: toMUR(commissionRaw, p.currency),
-    netMUR: toMUR(netRaw, p.currency),
+    caMUR: toMUR(caRaw, p.currency, conversionDate),
+    commissionMUR: toMUR(commissionRaw, p.currency, conversionDate),
+    netMUR: toMUR(netRaw, p.currency, conversionDate),
     dossier,
     isDatePlaceholder,
   }
@@ -407,6 +454,32 @@ export default function DashboardPage() {
     sync()
     window.addEventListener("storage", sync)
     return () => window.removeEventListener("storage", sync)
+  }, [])
+
+  // Précharge l'historique des taux pour les 5 devises étrangères (1 an).
+  // Utilisé par toMUR() pour convertir chaque projet à son taux à la date du
+  // champ conversionDateField (paramétrable depuis /reglages).
+  // Cache /api/rates/history côté serveur (1h) — les hits suivants sont gratuits.
+  useEffect(() => {
+    const currencies = ["EUR", "USD", "GBP", "KES", "ZAR"] as const
+    let cancelled = false
+    Promise.all(
+      currencies.map(c =>
+        fetch(`/api/rates/history?currency=${c}&days=365`)
+          .then(r => r.json())
+          .then((d: { points?: RateHistoryPoint[] }) => ({ c, points: d.points ?? [] }))
+          .catch(() => ({ c, points: [] as RateHistoryPoint[] }))
+      ),
+    ).then(entries => {
+      if (cancelled) return
+      const map: Record<string, RateHistoryPoint[]> = {}
+      for (const e of entries) map[e.c] = e.points
+      applyHistory(map)
+      // Force recompute des memos finance — caMUR/netMUR/commissionMUR utilisent maintenant les rates historiques
+      forceFinanceRecompute(n => n + 1)
+      setProjects(prev => [...prev])
+    })
+    return () => { cancelled = true }
   }, [])
 
   // Fetch taux de conversion live → MUR (EUR, USD, GBP, KES, ZAR)

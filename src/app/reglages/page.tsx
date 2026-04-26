@@ -150,79 +150,90 @@ export default function ReglagesPage() {
       .finally(() => setProjectsLoading(false))
   }, [allowed])
 
-  // Conversion rates : currency + timeframe + history fetch
+  // Conversion rates : currency (graph) + timeframe + history multi-devises
+  // Le GRAPH montre la devise sélectionnée. La LISTE affiche tous les projets
+  // étrangers avec leur taux historique propre — on fetch les 5 devises en parallèle.
   const [selectedCurrency, setSelectedCurrency] = useState<CurrencyCode>("EUR")
   const [selectedDays, setSelectedDays] = useState<number>(180)
-  const [history, setHistory] = useState<RatePoint[]>([])
+  const [historyByCurrency, setHistoryByCurrency] = useState<Record<string, RatePoint[]>>({})
   const [historyLoading, setHistoryLoading] = useState(false)
 
   useEffect(() => {
     if (!allowed) return
     setHistoryLoading(true)
     let cancelled = false
-    fetch(`/api/rates/history?currency=${selectedCurrency}&days=${selectedDays}`)
-      .then(r => r.json())
-      .then((d: { points?: RatePoint[] }) => {
-        if (!cancelled) setHistory(d.points || [])
+    Promise.all(
+      CURRENCY_OPTIONS.map(c =>
+        fetch(`/api/rates/history?currency=${c}&days=${selectedDays}`)
+          .then(r => r.json())
+          .then((d: { points?: RatePoint[] }) => ({ currency: c, points: d.points ?? [] }))
+          .catch(() => ({ currency: c, points: [] as RatePoint[] })),
+      ),
+    )
+      .then(entries => {
+        if (cancelled) return
+        const map: Record<string, RatePoint[]> = {}
+        for (const e of entries) map[e.currency] = e.points
+        setHistoryByCurrency(map)
       })
-      .catch(() => { if (!cancelled) setHistory([]) })
       .finally(() => { if (!cancelled) setHistoryLoading(false) })
     return () => { cancelled = true }
-  }, [allowed, selectedCurrency, selectedDays])
+  }, [allowed, selectedDays])
+
+  const history = useMemo(() => historyByCurrency[selectedCurrency] || [], [historyByCurrency, selectedCurrency])
 
   // Helper : récupère la date d'un projet selon le settings.conversionDateField
   const getProjectDate = useCallback((p: Project): string => {
     return p[settings.conversionDateField] || p.endDate || p.startDate || ""
   }, [settings.conversionDateField])
 
-  // Helper : trouve le point historique le plus proche d'une date (ISO YYYY-MM-DD)
-  const findRateAtDate = useCallback((iso: string): { rate: number; matched: string } | null => {
-    if (!iso || history.length === 0) return null
-    // Tri ascendant assuré côté API ; binary-ish search sur date string
+  // Helper : trouve le point historique le plus proche dans une série donnée
+  function findRateInSeries(series: RatePoint[], iso: string): { rate: number; matched: string } | null {
+    if (!iso || series.length === 0) return null
     let best: RatePoint | null = null
-    for (const p of history) {
+    for (const p of series) {
       if (p.date <= iso) best = p
       else break
     }
-    if (!best) best = history[0]
+    if (!best) best = series[0]
     return { rate: best.rate, matched: best.date }
-  }, [history])
+  }
 
-  // Liste des projets convertis (currency != MUR), avec rate et conversion
+  // Liste des projets convertis : TOUTES devises étrangères (≠ MUR), pas seulement celle sélectionnée.
+  // Chaque projet utilise son propre historique (historyByCurrency[p.currency]).
   const convertedProjects = useMemo(() => {
-    if (selectedCurrency === "USD" || selectedCurrency === "EUR" || selectedCurrency === "GBP" || selectedCurrency === "KES" || selectedCurrency === "ZAR") {
-      return projects
-        .filter(p => p.currency === selectedCurrency)
-        .map(p => {
-          const date = getProjectDate(p)
-          const amount = (p.finalAmount && p.finalAmount > 0) ? p.finalAmount : (p.quotedAmount || 0)
-          const found = findRateAtDate(date)
-          const rate = found?.rate ?? 0
-          const matched = found?.matched ?? ""
-          return {
-            ...p,
-            date,
-            amount,
-            rate,
-            matched,
-            converted: amount * rate,
-            isMatchedExact: matched === date,
-          }
-        })
-        .filter(p => p.amount > 0)
-        .sort((a, b) => b.date.localeCompare(a.date))
-    }
-    return []
-  }, [projects, selectedCurrency, getProjectDate, findRateAtDate])
+    return projects
+      .filter(p => p.currency && p.currency !== "MUR")
+      .map(p => {
+        const date = getProjectDate(p)
+        const amount = (p.finalAmount && p.finalAmount > 0) ? p.finalAmount : (p.quotedAmount || 0)
+        const series = historyByCurrency[p.currency] || []
+        const found = findRateInSeries(series, date)
+        const rate = found?.rate ?? 0
+        const matched = found?.matched ?? ""
+        return {
+          ...p,
+          date,
+          amount,
+          rate,
+          matched,
+          converted: amount * rate,
+          isMatchedExact: matched === date,
+        }
+      })
+      .filter(p => p.amount > 0)
+      .sort((a, b) => b.date.localeCompare(a.date))
+  }, [projects, historyByCurrency, getProjectDate])
 
-  // Points à highlighter sur le graph (= dates des projets convertis dans la fenêtre)
+  // Points à highlighter sur le graph : seulement les projets de la devise sélectionnée
+  // (le graph affiche une seule devise à la fois)
   const referenceDots = useMemo(() => {
     const inWindow = new Set(history.map(h => h.date))
     return convertedProjects
-      .filter(p => p.date && inWindow.has(p.matched))
+      .filter(p => p.currency === selectedCurrency && p.date && inWindow.has(p.matched))
       .map(p => ({ date: p.matched, rate: p.rate, name: p.name, amount: p.amount, currency: p.currency }))
-      .slice(0, 200) // limite raisonnable d'overlay
-  }, [convertedProjects, history])
+      .slice(0, 200)
+  }, [convertedProjects, history, selectedCurrency])
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
@@ -409,13 +420,13 @@ export default function ReglagesPage() {
             )}
           </div>
 
-          {/* Liste projets convertis */}
+          {/* Liste projets convertis — TOUTES devises étrangères */}
           <div style={{ background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: "var(--radius-card)", padding: 0, overflow: "hidden" }}>
             <div style={{ padding: "12px 20px", borderBottom: "1px solid var(--border-subtle)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div>
-                <div style={{ fontSize: "var(--fs-sm)", fontWeight: 600 }}>Projets convertis ({selectedCurrency})</div>
+                <div style={{ fontSize: "var(--fs-sm)", fontWeight: 600 }}>Projets convertis</div>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>
-                  {convertedProjects.length} projet{convertedProjects.length !== 1 ? "s" : ""} · taux historiques au champ <strong>{DATE_FIELD_OPTIONS.find(o => o.value === settings.conversionDateField)?.notionField}</strong>
+                  {convertedProjects.length} projet{convertedProjects.length !== 1 ? "s" : ""} en devise étrangère · taux historiques au champ <strong>{DATE_FIELD_OPTIONS.find(o => o.value === settings.conversionDateField)?.notionField}</strong>
                 </div>
               </div>
             </div>
@@ -423,7 +434,7 @@ export default function ReglagesPage() {
               <div style={{ padding: 24, color: "var(--text-muted)", textAlign: "center" }}>Chargement projets…</div>
             ) : convertedProjects.length === 0 ? (
               <div style={{ padding: 24, color: "var(--text-muted)", textAlign: "center", fontStyle: "italic" }}>
-                Aucun projet en {selectedCurrency} dans la base
+                Aucun projet en devise étrangère dans la base
               </div>
             ) : (
               <div style={{ overflowX: "auto", maxHeight: 480, overflowY: "auto" }}>
@@ -432,31 +443,38 @@ export default function ReglagesPage() {
                     <tr style={{ position: "sticky", top: 0, background: "var(--bg-card)", borderBottom: "1px solid var(--border-subtle)" }}>
                       <th style={thStyle}>Projet</th>
                       <th style={thStyle}>Client</th>
-                      <th style={{ ...thStyle, textAlign: "right" }}>Montant {selectedCurrency}</th>
+                      <th style={thStyle}>Devise</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>Montant</th>
                       <th style={thStyle}>Date prise</th>
-                      <th style={thStyle}>Taux trouvé</th>
+                      <th style={thStyle}>Date taux</th>
                       <th style={{ ...thStyle, textAlign: "right" }}>Taux MUR</th>
                       <th style={{ ...thStyle, textAlign: "right" }}>Converti MUR</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {convertedProjects.map(p => (
-                      <tr key={p.id} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)" }}>
-                        <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</td>
-                        <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName || "—"}</td>
-                        <td style={{ ...tdStyle, fontFamily: "monospace", textAlign: "right" }}>{Math.round(p.amount).toLocaleString("fr-FR")}</td>
-                        <td style={{ ...tdStyle, color: "var(--text-muted)", fontFamily: "monospace" }}>{p.date || "—"}</td>
-                        <td style={{ ...tdStyle, color: p.isMatchedExact ? "var(--text-secondary)" : "var(--color-warning)", fontFamily: "monospace", fontSize: "var(--fs-2xs)" }}>
-                          {p.matched || "—"}{!p.isMatchedExact && p.matched ? " ≈" : ""}
-                        </td>
-                        <td style={{ ...tdStyle, fontFamily: "monospace", textAlign: "right" }}>
-                          {p.rate > 0 ? p.rate.toFixed(3) : "—"}
-                        </td>
-                        <td style={{ ...tdStyle, fontFamily: "monospace", textAlign: "right", color: "var(--accent)", fontWeight: 600 }}>
-                          {p.converted > 0 ? Math.round(p.converted).toLocaleString("fr-FR") : "—"}
-                        </td>
-                      </tr>
-                    ))}
+                    {convertedProjects.map(p => {
+                      const isHighlighted = p.currency === selectedCurrency
+                      return (
+                        <tr key={p.id} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", background: isHighlighted ? "rgba(166,201,206,0.04)" : "transparent" }}>
+                          <td style={{ ...tdStyle, fontWeight: 500, maxWidth: 240, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</td>
+                          <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.clientName || "—"}</td>
+                          <td style={{ ...tdStyle, fontFamily: "monospace", color: isHighlighted ? "var(--accent)" : "var(--text-secondary)", fontWeight: isHighlighted ? 600 : 500 }}>
+                            {p.currency}
+                          </td>
+                          <td style={{ ...tdStyle, fontFamily: "monospace", textAlign: "right" }}>{Math.round(p.amount).toLocaleString("fr-FR")}</td>
+                          <td style={{ ...tdStyle, color: "var(--text-muted)", fontFamily: "monospace" }}>{p.date || "—"}</td>
+                          <td style={{ ...tdStyle, color: p.isMatchedExact ? "var(--text-secondary)" : "var(--color-warning)", fontFamily: "monospace", fontSize: "var(--fs-2xs)" }}>
+                            {p.matched || "—"}{!p.isMatchedExact && p.matched ? " ≈" : ""}
+                          </td>
+                          <td style={{ ...tdStyle, fontFamily: "monospace", textAlign: "right" }}>
+                            {p.rate > 0 ? p.rate.toFixed(3) : "—"}
+                          </td>
+                          <td style={{ ...tdStyle, fontFamily: "monospace", textAlign: "right", color: "var(--accent)", fontWeight: 600 }}>
+                            {p.converted > 0 ? Math.round(p.converted).toLocaleString("fr-FR") : "—"}
+                          </td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
