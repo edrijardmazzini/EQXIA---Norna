@@ -8,12 +8,19 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, AreaChart, Area, ScatterChart, Scatter, ZAxis, ReferenceLine, Legend, Line,
 } from "recharts"
+import {
+  BarChart3, Telescope, Settings, TrendingUp, Percent, Wallet, Zap,
+  CheckCircle2, AlertTriangle, XCircle, Monitor, Moon, Sun, BarChart2, LineChart,
+  Database, AlertOctagon, AlertCircle, Users, DollarSign, RefreshCw,
+  Briefcase, UserCheck, CalendarX, ShieldAlert, Info,
+} from "lucide-react"
+import { EqxiaLoadingScreen } from "@/components/eqxia"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Project {
   id: string; name: string; status: string; type: string; methodology: string
-  currency: string; quotedAmount: number; finalAmount: number
+  currency: string; quotedAmount: number; quotedAmountIsEmpty?: boolean; finalAmount: number
   winPercent: number
   /** Formule Notion "% win (auto)" — fallback quand winPercent = 0. */
   winAuto?: number
@@ -1458,17 +1465,7 @@ export default function DashboardPage() {
 
   // ─── Loading ────────────────────────────────────────────────────────────────
 
-  if (status === "loading" || loading) return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundImage: `url(${bgImage})`, backgroundSize: "cover", backgroundPosition: "center" }}>
-      <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.32)" }} />
-      <div style={{ textAlign: "center", position: "relative", zIndex: 1 }}>
-        <img src="/assets/logos/eqxia-logo-teal-transparent.png" alt="EQXIA" style={{ height: "var(--loading-logo-h)", marginBottom: 20 }} />
-        <div style={{ color: "#A6C9CE", fontFamily: "'Inter', system-ui, sans-serif", fontSize: "var(--loading-app-fs)", fontWeight: 800, letterSpacing: "0.22em", textTransform: "uppercase", marginBottom: 28 }}>Plutus</div>
-        <div style={{ width: 36, height: 36, border: "3px solid var(--border-subtle)", borderTopColor: "var(--accent)", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
-        <div style={{ color: "#A6C9CE", fontFamily: "'Inter', system-ui, sans-serif", fontSize: "var(--fs-sm)", fontWeight: 300, letterSpacing: "0.12em" }}>Chargement…</div>
-      </div>
-    </div>
-  )
+  if (status === "loading" || loading) return <EqxiaLoadingScreen appName="Plutus" bgImage={bgImage} />
 
   const fmt = (v: any) => `${Math.round(Number(v)).toLocaleString("fr-FR")} MUR`
   const fmtK = (v: any) => `${(Number(v) / 1000).toFixed(0)}k`
@@ -1508,7 +1505,7 @@ export default function DashboardPage() {
                     style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", textDecoration: "none", padding: "4px 10px", borderRadius: "var(--radius-btn)", border: "1px solid var(--border-subtle)", background: "var(--bg-card)", whiteSpace: "nowrap" }}
                     title="Page admin — règles de calcul + taux de conversion"
                   >
-                    ⚙️ Réglages
+                    <Settings size={13} style={{ marginRight: 5, flexShrink: 0 }} /> Réglages
                   </a>
                 )
               })()}
@@ -1523,7 +1520,7 @@ export default function DashboardPage() {
 
           {/* ── Tabs navigation ── */}
           <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid var(--border-subtle)" }}>
-            {[["dashboard", "📊 Dashboard"], ["previsionnel", "🔮 Prévisionnel"]].map(([key, label]) => (
+            {([["dashboard", <><BarChart3 size={13} style={{ marginRight: 5, flexShrink: 0 }} />Dashboard</>], ["previsionnel", <><Telescope size={13} style={{ marginRight: 5, flexShrink: 0 }} />Prévisionnel</>]] as [string, React.ReactNode][]).map(([key, label]) => (
               <button
                 key={key}
                 onClick={() => setActiveTab(key as any)}
@@ -1546,8 +1543,8 @@ export default function DashboardPage() {
             ))}
             <div style={{ flex: 1 }} />
             {ratesUpdated && (
-              <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", alignSelf: "center", fontFamily: "monospace" }} title={`Taux mis à jour : ${ratesUpdated}`}>
-                💱 Taux live · USD {Math.round(rates.USD || 0)} · EUR {Math.round(rates.EUR || 0)} · GBP {Math.round(rates.GBP || 0)} MUR
+              <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", alignSelf: "center", fontFamily: "monospace", display: "flex", alignItems: "center", gap: 4 }} title={`Taux mis à jour : ${ratesUpdated}`}>
+                <RefreshCw size={10} /> Taux live · USD {Math.round(rates.USD || 0)} · EUR {Math.round(rates.EUR || 0)} · GBP {Math.round(rates.GBP || 0)} MUR
               </div>
             )}
           </div>
@@ -1577,7 +1574,7 @@ export default function DashboardPage() {
                   <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>{revKpiMode === "rev" ? "Revenu" : "CA"}</div>
                   <Seg value={revKpiMode} onChange={v => setRevKpiMode(v as any)} options={[["rev", "Revenu"], ["ca", "CA"]]} />
                 </div>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(166,201,206,0.15)", border: "1px solid rgba(166,201,206,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>💰</div>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(166,201,206,0.15)", border: "1px solid rgba(166,201,206,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}><TrendingUp size={16} color="var(--accent)" /></div>
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <span style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)", letterSpacing: "-0.03em", lineHeight: 1 }}>{Math.round(revKpiMode === "rev" ? revTotal : caTotal).toLocaleString("fr-FR")}</span>
@@ -1595,7 +1592,7 @@ export default function DashboardPage() {
             <div style={{ ...card, display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>Average Margin</div>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(166,201,206,0.15)", border: "1px solid rgba(166,201,206,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📉</div>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(166,201,206,0.15)", border: "1px solid rgba(166,201,206,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}><Percent size={16} color="var(--accent)" /></div>
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <span style={{ fontSize: 28, fontWeight: 800, color: avgMarginWithSalaries >= 0 ? "var(--accent)" : "var(--color-error)", letterSpacing: "-0.03em", lineHeight: 1 }}>{avgMarginWithSalaries.toFixed(1)}</span>
@@ -1613,7 +1610,7 @@ export default function DashboardPage() {
             <div style={{ ...card, display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>Charges (Dépenses &amp; Salaires)</div>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>💸</div>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}><Wallet size={16} color="#ef4444" /></div>
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <span style={{ fontSize: 28, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em", lineHeight: 1 }}>{Math.round(chargesTotal).toLocaleString("fr-FR")}</span>
@@ -1630,7 +1627,7 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            <KpiCard icon="⚡" iconBg="rgba(20,184,166,0.15)" iconBorder="rgba(20,184,166,0.3)" label="Projets actifs" value={`${projetsActifs}`} unit={`/ ${projetsTotal}`} sub="Status = Active" />
+            <KpiCard icon={<Zap size={16} color="rgb(20,184,166)" />} iconBg="rgba(20,184,166,0.15)" iconBorder="rgba(20,184,166,0.3)" label="Projets actifs" value={`${projetsActifs}`} unit={`/ ${projetsTotal}`} sub="Status = Active" />
           </div>
 
           {/* ── Finance Dashboard ── */}
@@ -2535,21 +2532,21 @@ export default function DashboardPage() {
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>Valeurs Notion (Health)</div>
               </div>
               <div style={{ padding: "18px 20px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>✅ OK</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 4 }}><CheckCircle2 size={12} color="#22c55e" /> OK</div>
                 <div style={{ fontSize: 26, fontWeight: 800, color: "#22c55e", fontFamily: "monospace", marginTop: 6 }}>{healthStats.ok}</div>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
                   {healthStats.total > 0 ? Math.round((healthStats.ok / healthStats.total) * 100) : 0} % des projets
                 </div>
               </div>
               <div style={{ padding: "18px 20px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>⚠️ Warning</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 4 }}><AlertTriangle size={12} color="#facc15" /> Warning</div>
                 <div style={{ fontSize: 26, fontWeight: 800, color: "#facc15", fontFamily: "monospace", marginTop: 6 }}>{healthStats.warning}</div>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
                   {healthStats.total > 0 ? Math.round((healthStats.warning / healthStats.total) * 100) : 0} % des projets
                 </div>
               </div>
               <div style={{ padding: "18px 20px" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>❌ Critical</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em", display: "flex", alignItems: "center", gap: 4 }}><XCircle size={12} color="#ef4444" /> Critical</div>
                 <div style={{ fontSize: 26, fontWeight: 800, color: "#ef4444", fontFamily: "monospace", marginTop: 6 }}>{healthStats.critical}</div>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
                   {healthStats.total > 0 ? Math.round((healthStats.critical / healthStats.total) * 100) : 0} % des projets
@@ -2578,7 +2575,7 @@ export default function DashboardPage() {
                 <Seg
                   value={healthFilter}
                   onChange={v => setHealthFilter(v as any)}
-                  options={[["critical", "❌ Critical"], ["warning", "⚠️ Warning"], ["all", "Tous"]]}
+                  options={[["critical", "Critical"], ["warning", "Warning"], ["all", "Tous"]]}
                 />
               </div>
               {filteredHealth.length === 0 ? (
@@ -2652,19 +2649,19 @@ export default function DashboardPage() {
               <div onClick={() => setThemeOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 98 }} />
               <div style={{ position: "absolute", bottom: "calc(100% + 8px)", left: "50%", transform: "translateX(-50%)", display: "flex", flexDirection: "column", gap: 4, zIndex: 99, background: "var(--bg-panel)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", border: "1px solid var(--border-panel)", borderRadius: 10, padding: 4, boxShadow: "var(--shadow-card)" }}>
                 {(["auto", "dark", "light"] as const).map(m => {
-                  const icons: Record<string, string> = { auto: "\u{1F310}", dark: "\u{1F319}", light: "\u{2600}\u{FE0F}" }
+                  const ThemeIcon = { auto: Monitor, dark: Moon, light: Sun }[m]
                   const active = mode === m
                   return (
-                    <button key={m} onClick={() => { setTheme(m); setThemeOpen(false) }} style={{ width: 36, height: 36, background: active ? "var(--accent-soft)" : "none", border: "none", borderLeft: active ? "2px solid var(--accent)" : "2px solid transparent", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--fs-base)", transition: "background 0.2s", opacity: active ? 1 : 0.5 }}>
-                      {icons[m]}
+                    <button key={m} onClick={() => { setTheme(m); setThemeOpen(false) }} style={{ width: 36, height: 36, background: active ? "var(--accent-soft)" : "none", border: "none", borderLeft: active ? "2px solid var(--accent)" : "2px solid transparent", borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "background 0.2s", opacity: active ? 1 : 0.5 }}>
+                      <ThemeIcon size={15} />
                     </button>
                   )
                 })}
               </div>
             </>
           )}
-          <button onClick={() => setThemeOpen(!themeOpen)} title="Thème" style={{ width: 36, height: 36, background: "var(--bg-panel)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", border: "1px solid var(--border-panel)", borderRadius: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "var(--fs-base)", boxShadow: "var(--shadow-card)", transition: "opacity 0.2s" }}>
-            {({ auto: "\u{1F310}", dark: "\u{1F319}", light: "\u{2600}\u{FE0F}" } as Record<string, string>)[mode]}
+          <button onClick={() => setThemeOpen(!themeOpen)} title="Thème" style={{ width: 36, height: 36, background: "var(--bg-panel)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)", border: "1px solid var(--border-panel)", borderRadius: 10, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "var(--shadow-card)", transition: "opacity 0.2s" }}>
+            {{ auto: <Monitor size={15} />, dark: <Moon size={15} />, light: <Sun size={15} /> }[mode]}
           </button>
         </div>
       </div>
@@ -3198,7 +3195,7 @@ function SignOutButton() {
 }
 
 function KpiCard({ icon, iconBg, iconBorder, label, value, unit, sub, valueColor }: {
-  icon: string; iconBg: string; iconBorder: string; label: string; value: string; unit: string; sub?: string; valueColor?: string
+  icon: React.ReactNode; iconBg: string; iconBorder: string; label: string; value: string; unit: string; sub?: string; valueColor?: string
 }) {
   return (
     <div style={card}>
@@ -3864,7 +3861,7 @@ function PrevisionnelView({ projects, employees, depenses, recurringCriticalMens
       {/* Header explicatif + sélecteur de plage */}
       <div style={{ ...card, marginBottom: 16, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-primary)" }}>🔮 Prévisionnel · {rangeLabels[futureRange]}</div>
+          <div style={{ fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-primary)", display: "flex", alignItems: "center", gap: 6 }}><Telescope size={16} color="var(--accent)" /> Prévisionnel · {rangeLabels[futureRange]}</div>
           <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 4 }}>
             Projections basées sur les projets futurs (pondérés Win %), salaires constants et dépenses récurrentes critiques.
           </div>
@@ -3891,6 +3888,9 @@ function PrevisionnelView({ projects, employees, depenses, recurringCriticalMens
           ))}
         </div>
       </div>
+
+      {/* Database Review */}
+      <DBReviewPanel projects={projects} employees={employees} depenses={depenses} />
 
       {/* KPIs projetés */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 20 }}>
@@ -4087,6 +4087,173 @@ function PrevisionnelView({ projects, employees, depenses, recurringCriticalMens
   )
 }
 
+// ───────── Database Review Panel ─────────
+type IssueLevel = "critical" | "warning" | "info"
+interface DBIssue { level: IssueLevel; source: "projects" | "employees" | "depenses"; entity: string; entityId: string; field: string; message: string }
+
+function DBReviewPanel({ projects, employees, depenses }: { projects: Project[]; employees: Employee[]; depenses: Depense[] }) {
+  const [filter, setFilter] = useState<"all" | "critical" | "warning">("critical")
+  const [section, setSection] = useState<"all" | "projects" | "employees" | "depenses">("all")
+
+  const issues = useMemo<DBIssue[]>(() => {
+    const out: DBIssue[] = []
+    const addP = (level: IssueLevel, entity: string, entityId: string, field: string, message: string) =>
+      out.push({ level, source: "projects", entity, entityId, field, message })
+    const addE = (level: IssueLevel, entity: string, entityId: string, field: string, message: string) =>
+      out.push({ level, source: "employees", entity, entityId, field, message })
+    const addD = (level: IssueLevel, entity: string, entityId: string, field: string, message: string) =>
+      out.push({ level, source: "depenses", entity, entityId, field, message })
+
+    // ── Projets ──────────────────────────────────────────────────────────
+    const SKIP_STATUSES = new Set(["Lost", "Cancelled"])
+    projects.filter(p => !SKIP_STATUSES.has(p.status)).forEach(p => {
+      const isInternal = p.type === "Internal"
+      const label = p.name || p.id
+
+      // Date de fin manquante — critique pour tout projet
+      if (!p.endDate) addP("critical", label, p.id, "End Date", "Pas de date de fin — impossible de calculer le mois de revenu")
+
+      // Phase manquante
+      if (!p.phase) addP("warning", label, p.id, "Phase", "Phase non renseignée")
+
+      if (isInternal) {
+        // Projets internes : le client == Eqxia, pas de vrai revenu externe
+        if (!p.humanCost && !p.netAmount) addP("warning", label, p.id, "Human Cost / Net Amount", "Coût humain et net amount non renseignés pour un projet interne")
+      } else {
+        // Projets externes
+        if (p.quotedAmountIsEmpty) addP("critical", label, p.id, "Quoted Amount", "Quoted Amount vide (non renseigné) — le projet ne sera pas valorisé")
+
+        const noWinGut = !p.winPercent || p.winPercent === 0
+        const noWinAuto = !p.winAuto || p.winAuto === 0
+        if (noWinGut && noWinAuto) {
+          addP("critical", label, p.id, "Win Rate", "Aucun win rate (ni gut feeling ni auto) — CA prévisionnel = 0")
+        } else if (noWinGut && !noWinAuto) {
+          addP("warning", label, p.id, "Win % (gut feeling)", "Win % gut feeling absent — fallback sur la formule auto Notion")
+        }
+
+        // Commission sans bénéficiaire
+        if ((p.commissionPercent || 0) > 0 && !p.commissionTo) addP("warning", label, p.id, "Commission To", "Commission % renseigné mais bénéficiaire absent")
+
+        // Client manquant (non Internal)
+        if (!p.clientName || p.clientName === "N/A") addP("warning", label, p.id, "Client", "Aucun client lié — relations non renseignées dans Notion")
+      }
+
+      // Owner / responsable manquant
+      if (!p.ownerName) addP("warning", label, p.id, "Owner", "Responsable projet non renseigné")
+    })
+
+    // ── Employees ────────────────────────────────────────────────────────
+    employees.forEach(e => {
+      const label = e.name || e.id
+      if (e.role === "Intern" || e.role === "Stagiaire") return // exclus volontairement
+
+      if (e.cje > 0 && !e.dateFirstSalary) {
+        addE("critical", label, e.id, "Date Premier Salaire", "CJE renseigné mais Date Premier Salaire vide → employé exclu des calculs de salaires")
+      }
+      if (!e.role) {
+        addE("warning", label, e.id, "Rôle", "Rôle vide — impossible de distinguer stagiaire / employé pour l'exclusion automatique")
+      }
+      if (!e.country) {
+        addE("warning", label, e.id, "Pays", "Pays vide — règle 13e mois Maurice non applicable si non renseigné")
+      }
+      if ((!e.cje || e.cje === 0) && !e.endDate) {
+        addE("warning", label, e.id, "CJE", "CJE = 0 sur un employé actif (sans date de sortie)")
+      }
+    })
+
+    // ── Dépenses ─────────────────────────────────────────────────────────
+    const rc = depenses.filter(d => d.recurringCritical)
+    rc.forEach(d => {
+      const label = d.description || d.fournisseur || d.id
+      if (!d.abonnement || !d.abonnement.trim()) {
+        addD("critical", label, d.id, "Abonnement", "Recurring Critical sans champ Abonnement → déduplication par fournisseur/description/catégorie (fragile)")
+      }
+      if (!d.recurrence) {
+        addD("warning", label, d.id, "Récurrence", "Récurrence non renseignée → supposé Mensuel (si Annuel non détecté, coût sur-estimé × 12)")
+      }
+      if (!d.date) {
+        addD("critical", label, d.id, "Date", "Date vide sur une dépense Recurring Critical → impossible de prendre la valeur la plus récente pour la déduplication")
+      }
+      if (d.montantMUR === 0 && (d.montant || 0) > 0) {
+        addD("warning", label, d.id, "Montant MUR", `Montant MUR = 0 mais Montant brut = ${d.montant} ${d.devise} → conversion manquante, non comptée dans le prévisionnel`)
+      }
+    })
+
+    return out.sort((a, b) => {
+      const order: Record<IssueLevel, number> = { critical: 0, warning: 1, info: 2 }
+      return order[a.level] - order[b.level]
+    })
+  }, [projects, employees, depenses])
+
+  const filtered = issues.filter(i => {
+    if (filter !== "all" && i.level !== filter) return false
+    if (section !== "all" && i.source !== section) return false
+    return true
+  })
+  const counts = { critical: issues.filter(i => i.level === "critical").length, warning: issues.filter(i => i.level === "warning").length }
+
+  const IssueIcon = ({ level }: { level: IssueLevel }) =>
+    level === "critical" ? <AlertOctagon size={13} color="#ef4444" style={{ flexShrink: 0 }} />
+    : level === "warning" ? <AlertTriangle size={13} color="#facc15" style={{ flexShrink: 0 }} />
+    : <Info size={13} color="#60a5fa" style={{ flexShrink: 0 }} />
+
+  return (
+    <div style={{ ...card, marginBottom: 16, padding: 0, overflow: "hidden" }}>
+      {/* Header */}
+      <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(166,201,206,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <Database size={15} color="var(--accent)" />
+          <span style={{ fontSize: "var(--fs-md)", fontWeight: 600 }}>Database Review</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: 6 }}>
+            {counts.critical > 0 && <span style={{ padding: "2px 8px", borderRadius: 4, background: "rgba(239,68,68,0.15)", color: "#ef4444", fontSize: "var(--fs-2xs)", fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}><AlertOctagon size={10} /> {counts.critical} Critical</span>}
+            {counts.warning > 0 && <span style={{ padding: "2px 8px", borderRadius: 4, background: "rgba(250,204,21,0.12)", color: "#facc15", fontSize: "var(--fs-2xs)", fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}><AlertTriangle size={10} /> {counts.warning} Warning</span>}
+            {counts.critical === 0 && counts.warning === 0 && <span style={{ padding: "2px 8px", borderRadius: 4, background: "rgba(34,197,94,0.12)", color: "#22c55e", fontSize: "var(--fs-2xs)", fontWeight: 700, display: "flex", alignItems: "center", gap: 3 }}><CheckCircle2 size={10} /> Tout OK</span>}
+          </span>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <Seg value={section} onChange={v => setSection(v as any)} options={[["all", "Tous"], ["projects", "Projets"], ["employees", "Employés"], ["depenses", "Dépenses"]]} />
+          <Seg value={filter} onChange={v => setFilter(v as any)} options={[["critical", "Critical"], ["warning", "Warning"], ["all", "Tous"]]} />
+        </div>
+      </div>
+
+      {/* Liste */}
+      {filtered.length === 0 ? (
+        <div style={{ padding: 28, textAlign: "center", color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontStyle: "italic", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+          <CheckCircle2 size={14} color="#22c55e" /> Aucune anomalie dans cette catégorie
+        </div>
+      ) : (
+        <div style={{ maxHeight: 380, overflowY: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+            <thead style={{ position: "sticky", top: 0, background: "var(--bg-panel)", zIndex: 2 }}>
+              <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                <th style={{ ...thStyle, width: 90 }}>Niveau</th>
+                <th style={thStyle}>Entité</th>
+                <th style={{ ...thStyle, width: 160 }}>Champ</th>
+                <th style={thStyle}>Message</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((issue, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", background: issue.level === "critical" ? "rgba(239,68,68,0.03)" : "transparent" }}>
+                  <td style={{ ...tdStyle }}>
+                    <span style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, background: issue.level === "critical" ? "rgba(239,68,68,0.12)" : "rgba(250,204,21,0.10)", color: issue.level === "critical" ? "#ef4444" : "#facc15", fontWeight: 700, fontSize: "var(--fs-2xs)", width: "fit-content" }}>
+                      <IssueIcon level={issue.level} />
+                      {issue.level === "critical" ? "Critical" : "Warning"}
+                    </span>
+                  </td>
+                  <td style={{ ...tdStyle, fontWeight: 600, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{issue.entity}</td>
+                  <td style={{ ...tdStyle, color: "var(--accent)", fontFamily: "monospace", fontSize: "var(--fs-2xs)" }}>{issue.field}</td>
+                  <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{issue.message}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ───────── Finance Dashboard (hero) ─────────
 // Séries rendues (identifiants = clés de toggle dans hidden) :
 //  Actuels (pleins) : CA (line), Revenu (area), Dépenses (area stack), Salaires (area stack base), EBITDA (line)
@@ -4247,8 +4414,8 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
             <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "var(--text-primary)" }}>Finance Dashboard</div>
             <div style={{ display: "flex", gap: 6 }}>
-              <button onClick={() => setChartType(t => t === "area" ? "bar" : "area")} title={chartType === "area" ? "Vue histogramme" : "Vue courbes"} style={{ background: chartType === "bar" ? "var(--accent-soft)" : "none", border: `1px solid ${chartType === "bar" ? "var(--accent)" : "var(--border-subtle)"}`, borderRadius: 6, color: chartType === "bar" ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>
-                {chartType === "area" ? "📊" : "📈"}
+              <button onClick={() => setChartType(t => t === "area" ? "bar" : "area")} title={chartType === "area" ? "Vue histogramme" : "Vue courbes"} style={{ background: chartType === "bar" ? "var(--accent-soft)" : "none", border: `1px solid ${chartType === "bar" ? "var(--accent)" : "var(--border-subtle)"}`, borderRadius: 6, color: chartType === "bar" ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {chartType === "area" ? <BarChart2 size={14} /> : <LineChart size={14} />}
               </button>
               <button onClick={() => setFullscreen(false)} title="Réduire" style={{ background: "none", border: "1px solid var(--border-subtle)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>✕</button>
             </div>
@@ -4271,8 +4438,8 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
           </div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
-          <button onClick={() => setChartType(t => t === "area" ? "bar" : "area")} title={chartType === "area" ? "Vue histogramme" : "Vue courbes"} style={{ background: chartType === "bar" ? "var(--accent-soft)" : "none", border: `1px solid ${chartType === "bar" ? "var(--accent)" : "var(--border-subtle)"}`, borderRadius: 6, color: chartType === "bar" ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>
-            {chartType === "area" ? "📊" : "📈"}
+          <button onClick={() => setChartType(t => t === "area" ? "bar" : "area")} title={chartType === "area" ? "Vue histogramme" : "Vue courbes"} style={{ background: chartType === "bar" ? "var(--accent-soft)" : "none", border: `1px solid ${chartType === "bar" ? "var(--accent)" : "var(--border-subtle)"}`, borderRadius: 6, color: chartType === "bar" ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {chartType === "area" ? <BarChart2 size={14} /> : <LineChart size={14} />}
           </button>
           <button onClick={() => setFullscreen(true)} title="Agrandir" style={{ background: "none", border: "1px solid var(--border-subtle)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", width: 28, height: 28, fontSize: 14 }}>⛶</button>
         </div>

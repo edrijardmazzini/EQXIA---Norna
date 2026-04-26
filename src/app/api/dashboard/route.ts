@@ -190,6 +190,7 @@ export async function GET() {
         methodology: getSelect(props["Methodology"]),
         currency: getSelect(props["Currency"]),
         quotedAmount: getNumber(props["Quoted Amount"]),
+        quotedAmountIsEmpty: props["Quoted Amount"]?.number === null || props["Quoted Amount"]?.number === undefined,
         finalAmount: getNumber(props["Final Amount"]),
         winPercent: getNumber(props["Win % (gut feeling)"]),
         winAuto: (() => {
