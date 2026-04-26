@@ -61,20 +61,33 @@ export function EqxiaLoadingScreen({ appName, bgImage }: EqxiaLoadingScreenProps
             fontWeight: 800,
             letterSpacing: '0.22em',
             textTransform: 'uppercase',
-            marginBottom: 32,
+            marginBottom: 28,
           }}>
             {appName}
           </div>
         )}
+
+        {/* Spinner */}
+        <div style={{
+          width: 28,
+          height: 28,
+          borderRadius: '50%',
+          border: '2.5px solid rgba(166, 201, 206, 0.20)',
+          borderTopColor: '#A6C9CE',
+          animation: 'spin 0.75s linear infinite',
+          marginBottom: 16,
+        }} />
+
+        {/* Texte tournant */}
         <div style={{
           color: '#A6C9CE',
           fontFamily: "'Inter', system-ui, sans-serif",
-          fontSize: 'var(--fs-2xl, 24px)',
-          fontWeight: 700,
-          letterSpacing: '0.06em',
+          fontSize: 'var(--fs-md, 15px)',
+          fontWeight: 500,
+          letterSpacing: '0.05em',
           opacity: visible ? 1 : 0,
           transition: 'opacity 0.07s ease',
-          minWidth: 300,
+          minWidth: 260,
           userSelect: 'none',
         }}>
           {LOADING_TEXTS[idx]}&hellip;

@@ -1505,7 +1505,7 @@ export default function DashboardPage() {
                     style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", textDecoration: "none", padding: "4px 10px", borderRadius: "var(--radius-btn)", border: "1px solid var(--border-subtle)", background: "var(--bg-card)", whiteSpace: "nowrap" }}
                     title="Page admin — règles de calcul + taux de conversion"
                   >
-                    <Settings size={13} style={{ marginRight: 5, flexShrink: 0 }} /> Réglages
+                    <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Settings size={13} />Réglages</span>
                   </a>
                 )
               })()}
@@ -3889,9 +3889,6 @@ function PrevisionnelView({ projects, employees, depenses, recurringCriticalMens
         </div>
       </div>
 
-      {/* Database Review */}
-      <DBReviewPanel projects={projects} employees={employees} depenses={depenses} />
-
       {/* KPIs projetés */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12, marginBottom: 20 }}>
         {[
@@ -4083,6 +4080,9 @@ function PrevisionnelView({ projects, employees, depenses, recurringCriticalMens
           </div>
         )}
       </div>
+
+      {/* Database Review — en bas du Prévisionnel */}
+      <DBReviewPanel projects={projects} employees={employees} depenses={depenses} />
     </div>
   )
 }
