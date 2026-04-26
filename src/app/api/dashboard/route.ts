@@ -190,6 +190,10 @@ export async function GET() {
         quotedAmount: getNumber(props["Quoted Amount"]),
         finalAmount: getNumber(props["Final Amount"]),
         winPercent: getNumber(props["Win % (gut feeling)"]),
+        winAuto: (() => {
+          const v = getFormula(props["% win (auto)"])
+          return typeof v === "number" ? v : 0
+        })(),
         riskLevel: getSelect(props["Risk Level"]),
         clientSatisfaction: getSelect(props["Client Satisfaction"]),
         startDate: getDate(props["Start Date"]),

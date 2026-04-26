@@ -14,7 +14,10 @@ import {
 interface Project {
   id: string; name: string; status: string; type: string; methodology: string
   currency: string; quotedAmount: number; finalAmount: number
-  winPercent: number; riskLevel: string; startDate: string; endDate: string
+  winPercent: number
+  /** Formule Notion "% win (auto)" — fallback quand winPercent = 0. */
+  winAuto?: number
+  riskLevel: string; startDate: string; endDate: string
   rentabilite: number | null; netAmount: number | null; humanCost: number | null
   clientName: string; clientSatisfaction?: string
   clientIds?: string[]
@@ -64,11 +67,53 @@ const toMUR = (amount: number, currency: string | undefined | null): number => {
   return (amount || 0) * rate
 }
 
+// ─── Settings dynamiques (pilotés par /reglages, persistés localStorage) ─────
+type SettingsDateField = "endDate" | "startDate" | "decisionDate"
+type SettingsWinPref = "gut-then-auto" | "auto-then-gut" | "gut-only" | "auto-only"
+
+interface RuntimeSettings {
+  dateField: SettingsDateField
+  winPref: SettingsWinPref
+}
+
+let __SETTINGS__: RuntimeSettings = { dateField: "endDate", winPref: "gut-then-auto" }
+
+function applySettings(s: Partial<RuntimeSettings>): void {
+  __SETTINGS__ = { ...__SETTINGS__, ...s }
+}
+
+function loadSettingsFromStorage(): RuntimeSettings {
+  if (typeof window === "undefined") return __SETTINGS__
+  try {
+    const raw = window.localStorage.getItem("plutus-reglages-v1")
+    if (!raw) return __SETTINGS__
+    const parsed = JSON.parse(raw)
+    return {
+      dateField: parsed.dateField ?? "endDate",
+      winPref: parsed.winPref ?? "gut-then-auto",
+    }
+  } catch {
+    return __SETTINGS__
+  }
+}
+
 // Helpers : Win % et Commission % normalisés (0-1)
+// La stratégie suit __SETTINGS__.winPref (modifiable depuis /reglages).
+function normalizeWin(value: number | undefined | null): number {
+  const v = Number(value || 0)
+  if (v <= 0) return 0
+  return Math.min(1, v > 1 ? v / 100 : v)
+}
 function getWinRate(p: Project): number {
-  const w = Number(p.winPercent || 0)
-  if (w <= 0) return 0
-  return w > 1 ? w / 100 : w
+  const gut = normalizeWin(p.winPercent)
+  const auto = normalizeWin(p.winAuto)
+  switch (__SETTINGS__.winPref) {
+    case "gut-only":     return gut
+    case "auto-only":    return auto
+    case "auto-then-gut": return auto > 0 ? auto : gut
+    case "gut-then-auto":
+    default:              return gut > 0 ? gut : auto
+  }
 }
 function getCommissionRate(p: Project): number {
   const c = Number(p.commissionPercent || 0)
@@ -76,35 +121,145 @@ function getCommissionRate(p: Project): number {
   return c > 1 ? c / 100 : c
 }
 
-// ─── Définition UNIQUE du Revenu (utilisé partout) ─────────────────
-// Revenu net = CA − Commission réellement versée (= si bénéficiaire + taux > 0)
-// Si aucun bénéficiaire défini OU taux à 0 → pas de commission soustraite.
-// Cohérent avec le bloc Cash & PNL.
+// ─── Calcul UNIQUE du revenu d'un projet (centralisé) ─────────────────
+//
+// Sépare en deux catégories selon endDate :
+//   "actual"   → endDate ≤ mois courant   (revenu réalisé / passé)
+//   "forecast" → endDate > mois courant   (revenu prévisionnel)
+//
+// Cas particulier — endDate absente ou invalide :
+//   Si quotedAmount × winRate > 0 → traité comme un forecast en attente
+//   d'avoir une endDate précise. Le dossier est défaulté à mois courant
+//   + FORECAST_FALLBACK_MONTHS. isDatePlaceholder=true permet à l'UI de
+//   signaler ce placeholder.
+//   Si quotedAmount × winRate ≤ 0 → null (aucun revenu calculable).
+//
+// Montants — règle DIFFÉRENTE selon kind :
+//   ACTUAL  : CA = finalAmount si > 0, sinon quotedAmount        (pas de pondération)
+//   FORECAST: CA = finalAmount si > 0, sinon quotedAmount × winRate
+//             où winRate = winPercent (gut feeling) || winAuto (formule Notion)
+//   Commission = CA × commissionRate (si bénéficiaire défini & taux > 0, sinon 0)
+//   Net        = CA − Commission
+//
+// Le forecast est pondéré par la proba de gain — l'actual reste brut.
+
+const FORECAST_FALLBACK_MONTHS = 3
+
 function hasRealCommission(p: Project): boolean {
   const beneficiaire = (p.commissionTo || "").trim()
   return !!beneficiaire && getCommissionRate(p) > 0
 }
-function getRevenueRaw(p: Project): number {
-  const commNet = hasRealCommission(p) ? (1 - getCommissionRate(p)) : 1
-  if (p.finalAmount && p.finalAmount > 0) {
-    return p.finalAmount * commNet
+
+type RevenueKind = "actual" | "forecast"
+
+interface ProjectRevenue {
+  kind: RevenueKind
+  /** CA brut dans la devise du projet (avant commission). */
+  caRaw: number
+  /** Montant commission dans la devise du projet (0 si pas de commission réelle). */
+  commissionRaw: number
+  /** Revenu net dans la devise du projet (= caRaw − commissionRaw). */
+  netRaw: number
+  /** Conversion MUR du CA brut. */
+  caMUR: number
+  /** Conversion MUR de la commission. */
+  commissionMUR: number
+  /** Conversion MUR du revenu net. */
+  netMUR: number
+  /** Code dossier YYMM associé (vrai endDate, ou current+3 si placeholder). */
+  dossier: string
+  /** True si dossier a été dérivé d'un fallback (endDate absente). */
+  isDatePlaceholder: boolean
+}
+
+function dossierCode(year: number, month1to12: number): string {
+  return `${String(year).slice(-2)}${String(month1to12).padStart(2, "0")}`
+}
+
+function computeProjectRevenue(p: Project, now: Date = new Date()): ProjectRevenue | null {
+  const todayCode = dossierCode(now.getFullYear(), now.getMonth() + 1)
+  const winRate = getWinRate(p)
+  const quoted = p.quotedAmount || 0
+  const final = p.finalAmount || 0
+
+  // Date de référence : pilotée par __SETTINGS__.dateField (modifiable via /reglages)
+  // Fallback sur endDate si le champ choisi est vide pour ce projet.
+  const projectAny = p as Project & { decisionDate?: string }
+  const dateValue =
+    (__SETTINGS__.dateField === "startDate" ? p.startDate : null) ??
+    (__SETTINGS__.dateField === "decisionDate" ? projectAny.decisionDate : null) ??
+    p.endDate ??
+    ""
+
+  let dossier: string
+  let kind: RevenueKind
+  let isDatePlaceholder = false
+
+  // 1) Date de référence présente et valide → split actual/forecast
+  if (dateValue) {
+    const d = new Date(dateValue)
+    if (!isNaN(d.getTime())) {
+      dossier = dossierCode(d.getFullYear(), d.getMonth() + 1)
+      kind = dossier <= todayCode ? "actual" : "forecast"
+    } else {
+      // date invalide → cas placeholder ci-dessous
+      dossier = ""
+      kind = "forecast"
+    }
+  } else {
+    dossier = ""
+    kind = "forecast"
   }
-  return (p.quotedAmount || 0) * getWinRate(p) * commNet
-}
-// CA brut (avant commission) — utilisé dans le bloc Cash pour PNL
-function getCARaw(p: Project): number {
-  if (p.finalAmount && p.finalAmount > 0) return p.finalAmount
-  return (p.quotedAmount || 0) * getWinRate(p)
-}
-function getCommissionRaw(p: Project): number {
-  return hasRealCommission(p) ? getCARaw(p) * getCommissionRate(p) : 0
+
+  // 2) Pas de dossier réel → c'est un forecast en attente d'endDate.
+  //    Critère de détection : quoted × winRate > 0 (revenu prévisionnel attendu).
+  if (!dossier) {
+    if (quoted <= 0 || winRate <= 0) return null
+    const future = new Date(now.getFullYear(), now.getMonth() + FORECAST_FALLBACK_MONTHS, 1)
+    dossier = dossierCode(future.getFullYear(), future.getMonth() + 1)
+    isDatePlaceholder = true
+  }
+
+  // 3) Calcul des montants — winRate appliqué uniquement aux forecasts sans finalAmount
+  const caRaw = final > 0
+    ? final
+    : (kind === "actual" ? quoted : quoted * winRate)
+  if (caRaw <= 0) return null
+  const commissionRaw = hasRealCommission(p) ? caRaw * getCommissionRate(p) : 0
+  const netRaw = caRaw - commissionRaw
+
+  return {
+    kind,
+    caRaw, commissionRaw, netRaw,
+    caMUR: toMUR(caRaw, p.currency),
+    commissionMUR: toMUR(commissionRaw, p.currency),
+    netMUR: toMUR(netRaw, p.currency),
+    dossier,
+    isDatePlaceholder,
+  }
 }
 
-const getRevenueMUR = (p: Project): number => toMUR(getRevenueRaw(p), p.currency)
-const getCAMUR = (p: Project): number => toMUR(getCARaw(p), p.currency)
-const getCommissionMUR = (p: Project): number => toMUR(getCommissionRaw(p), p.currency)
+// ─── Helpers backward-compat (délèguent à computeProjectRevenue) ──────────
+const getRevenueRaw    = (p: Project): number => computeProjectRevenue(p)?.netRaw        ?? 0
+const getCARaw         = (p: Project): number => computeProjectRevenue(p)?.caRaw         ?? 0
+const getCommissionRaw = (p: Project): number => computeProjectRevenue(p)?.commissionRaw ?? 0
+const getRevenueMUR    = (p: Project): number => computeProjectRevenue(p)?.netMUR        ?? 0
+const getCAMUR         = (p: Project): number => computeProjectRevenue(p)?.caMUR         ?? 0
+const getCommissionMUR = (p: Project): number => computeProjectRevenue(p)?.commissionMUR ?? 0
 
-// Mois associé au revenu : End Date (fallback Start Date)
+/**
+ * Code dossier YYMM associé au revenu du projet.
+ * Vraie endDate si présente, sinon current+FORECAST_FALLBACK_MONTHS pour les forecasts sans date.
+ * Retourne "" si le projet n'a aucun revenu calculable.
+ */
+function getProjectDossier(p: Project, now: Date = new Date()): string {
+  return computeProjectRevenue(p, now)?.dossier ?? ""
+}
+
+/**
+ * @deprecated — utiliser getProjectDossier(p) ou computeProjectRevenue(p).dossier directement.
+ * Conservé pour rétrocompat des call-sites qui veulent une chaîne ISO.
+ */
 function getRevenueDateISO(p: Project): string {
   return p.endDate || p.startDate || ""
 }
@@ -237,6 +392,22 @@ export default function DashboardPage() {
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
+
+  // Synchronise les settings runtime (/reglages) avec le module-level __SETTINGS__.
+  // Re-lecture au mount + sur événement 'storage' (autres onglets).
+  // Force un re-render des memos finance via setProjects(prev => [...prev]).
+  const [, forceFinanceRecompute] = useState(0)
+  useEffect(() => {
+    const sync = () => {
+      applySettings(loadSettingsFromStorage())
+      forceFinanceRecompute(n => n + 1)
+      setProjects(prev => [...prev])
+      setDepenses(prev => [...prev])
+    }
+    sync()
+    window.addEventListener("storage", sync)
+    return () => window.removeEventListener("storage", sync)
+  }, [])
 
   // Fetch taux de conversion live → MUR (EUR, USD, GBP, KES, ZAR)
   const [rates, setRates] = useState<Record<string, number>>(CURRENCY_RATES_FALLBACK)
@@ -489,14 +660,13 @@ export default function DashboardPage() {
   }, [depParCat])
 
   // Plage de mois Revenus mensuels (Total + Par types) — dépend du revView*
+  // Utilise computeProjectRevenue : projets sans endDate apparaissent à current+3.
   const revChartRange = useMemo(() => {
     const revMap: Record<string, number> = {}
     projects.forEach(p => {
-      const iso = getRevenueDateISO(p)
-      if (!iso) return
-      const d = new Date(iso)
-      const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
-      revMap[k] = (revMap[k] || 0) + getRevenueMUR(p)
+      const r = computeProjectRevenue(p)
+      if (!r) return
+      revMap[r.dossier] = (revMap[r.dossier] || 0) + r.netMUR
     })
     const depMap: Record<string, number> = {}
     depenses.forEach(d => { if (d.dossier) depMap[d.dossier] = (depMap[d.dossier] || 0) + d.montantMUR })
@@ -531,15 +701,14 @@ export default function DashboardPage() {
     const byMois: Record<string, Record<string, number>> = {}
     const typesSet = new Set<string>()
     // Tous les projets (pas seulement Won) — pondérés par win rate
-    projects.filter(p => getRevenueRaw(p) > 0).forEach(p => {
-      const iso = getRevenueDateISO(p)
-      if (!iso) return
-      const d = new Date(iso)
-      const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+    projects.forEach(p => {
       const type = p.type || "N/A"
       if (type === "Internal" || type === "N/A") return
+      const r = computeProjectRevenue(p)
+      if (!r) return
+      const k = r.dossier
       if (!byMois[k]) byMois[k] = {}
-      byMois[k][type] = (byMois[k][type] || 0) + getRevenueMUR(p)
+      byMois[k][type] = (byMois[k][type] || 0) + r.netMUR
       typesSet.add(type)
     })
     const types = [...typesSet]
@@ -579,16 +748,15 @@ export default function DashboardPage() {
   }, [depenses])
 
   // Liste des ventes/projets par mois (clé = dossier-style "YYMM") — pour tooltip "Revenus mensuels"
-  // Inclut TOUS les projets avec revenu > 0, sans filtrer sur Status — permet d'afficher les projections
+  // Inclut TOUS les projets avec revenu calculable, sans filtrer sur Status — permet d'afficher les projections
+  // Source canonique du dossier : computeProjectRevenue (current+3 pour forecasts sans endDate).
   const ventesListByMois = useMemo(() => {
     const m: Record<string, Project[]> = {}
-    projects.filter(p => getRevenueRaw(p) > 0).forEach(p => {
-      const iso = getRevenueDateISO(p)
-      if (!iso) return
-      const d = new Date(iso)
-      const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
-      if (!m[k]) m[k] = []
-      m[k].push(p)
+    projects.forEach(p => {
+      const r = computeProjectRevenue(p)
+      if (!r) return
+      if (!m[r.dossier]) m[r.dossier] = []
+      m[r.dossier].push(p)
     })
     Object.keys(m).forEach(k => m[k].sort((a, b) => getRevenueMUR(b) - getRevenueMUR(a)))
     return m
@@ -599,24 +767,21 @@ export default function DashboardPage() {
     const m: Record<string, { count: number; amount: number; amountProjected: number; countProjected: number }> = {}
     // On ne filtre plus Lost/Cancelled pour le pie car le user pilote par plage (même Lost peut compter si demandé)
     // Mais on garde l'exclusion Internal / N/A
-    const rangedProjects = projects.filter(p => {
+    type RangedEntry = { p: Project; r: ProjectRevenue }
+    const ranged: RangedEntry[] = []
+    projects.forEach(p => {
       const t = p.type || "N/A"
-      if (t === "Internal" || t === "N/A") return false
-      const iso = getRevenueDateISO(p)
-      if (!iso) return false
-      const d = new Date(iso)
-      const code = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
-      // Construire la plage filled pour savoir si le code est inclus
-      return revChartRange.filled.includes(code)
+      if (t === "Internal" || t === "N/A") return
+      const r = computeProjectRevenue(p)
+      if (!r) return
+      if (!revChartRange.filled.includes(r.dossier)) return
+      ranged.push({ p, r })
     })
-    rangedProjects.forEach(p => {
+    ranged.forEach(({ p, r }) => {
       const t = p.type || "N/A"
       if (!m[t]) m[t] = { count: 0, amount: 0, amountProjected: 0, countProjected: 0 }
-      const iso = getRevenueDateISO(p)
-      const d = new Date(iso)
-      const code = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
-      const isFuture = code > currentDossier
-      const amt = getRevenueMUR(p)
+      const isFuture = r.dossier > currentDossier
+      const amt = r.netMUR
       if (isFuture) {
         m[t].amountProjected += amt
         m[t].countProjected++
@@ -887,10 +1052,27 @@ export default function DashboardPage() {
       for (const f of labels) {
         if (!f.check(p)) missing.push(f.label)
       }
-      // Final Amount : manquant seulement pour projets non-Internal et passés
+      // Alertes financières (projets non-Internal uniquement)
       if (!isInternal) {
-        const isPast = p.startDate ? (new Date(p.startDate).getTime() < today.getTime()) : false
-        if (isPast && !(p.finalAmount > 0)) missing.push("Final Amount")
+        const r = computeProjectRevenue(p, today)
+        // a) Revenu actuel (projet passé) sans Final Amount → erreur DB
+        if (r?.kind === "actual" && !(p.finalAmount && p.finalAmount > 0)) {
+          missing.push("Final Amount")
+        }
+        // b) Net Amount Notion incohérent vs Final Amount × (1 − commission %)
+        //    Tolérance 1 unité (devise du projet) pour absorber arrondis Notion.
+        if (p.finalAmount && p.finalAmount > 0 && p.netAmount != null) {
+          const commRate = hasRealCommission(p) ? getCommissionRate(p) : 0
+          const expectedNet = p.finalAmount * (1 - commRate)
+          if (Math.abs(expectedNet - p.netAmount) > 1) {
+            missing.push("Net amount incohérent")
+          }
+        }
+        // c) Projet futur (quotedAmount renseigné) sans Win % gut feeling
+        //    → forecast non pondérable manuellement, on retombe sur winAuto si dispo.
+        if (r?.kind === "forecast" && p.quotedAmount > 0 && !(p.winPercent > 0)) {
+          missing.push("Win % (gut feeling)")
+        }
       }
       return { project: p, healthLabel, isCritical, isWarning, isOK, missing, isInternal }
     })
@@ -1143,6 +1325,20 @@ export default function DashboardPage() {
               >
                 Sales →
               </a>
+              {(() => {
+                const adminEmails = new Set(["emile.drijardmazzini@eqxia.com", "alexandre.govin@eqxia.com"])
+                const email = session?.user?.email?.toLowerCase()
+                if (!email || !adminEmails.has(email)) return null
+                return (
+                  <a
+                    href="/reglages"
+                    style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", textDecoration: "none", padding: "4px 10px", borderRadius: "var(--radius-btn)", border: "1px solid var(--border-subtle)", background: "var(--bg-card)", whiteSpace: "nowrap" }}
+                    title="Page admin — règles de calcul + taux de conversion"
+                  >
+                    ⚙️ Réglages
+                  </a>
+                )
+              })()}
               <SignOutButton />
             </div>
           }
