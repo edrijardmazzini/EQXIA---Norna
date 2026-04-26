@@ -32,6 +32,11 @@ interface Client { id: string; name: string }
 
 interface Employee {
   id: string; name: string; cje: number; startDate: string; endDate: string; role: string
+  /** Pays Notion (Select : France / Maurice / Autre). Pilote la règle 13e mois Maurice. */
+  country?: string
+  /** Date Premier Salaire — date à partir de laquelle l'employé est rémunéré (YYYY-MM-DD).
+   *  Vide ⇒ employé non comptabilisé dans les salaires. */
+  dateFirstSalary?: string
 }
 
 interface Depense {
@@ -39,6 +44,12 @@ interface Depense {
   categorie: string; sousCategorie: string; montant: number
   montantMUR: number; devise: string; dossier: string; payePar: string
   recurringCritical?: boolean
+  /** Notion Select : nom canonique de l'abonnement (Netflix, OVH, Notion Team, etc).
+   *  Permet de dédupliquer les dépenses récurrentes par abonnement plutôt que par fournisseur. */
+  abonnement?: string
+  /** Notion Select : "Mensuel" | "Annuel". Détermine si le coût récurrent est appliqué × 1
+   *  par mois (Mensuel) ou × 1/12 par mois (Annuel). */
+  recurrence?: string
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -216,6 +227,8 @@ function dossierCode(year: number, month1to12: number): string {
 }
 
 function computeProjectRevenue(p: Project, now: Date = new Date()): ProjectRevenue | null {
+  // Projet Lost / Cancelled → ne génère aucun revenu (ni actuel ni forecast)
+  if (p.status === "Lost" || p.status === "Cancelled") return null
   const todayCode = dossierCode(now.getFullYear(), now.getMonth() + 1)
   const winRate = getWinRate(p)
   const quoted = p.quotedAmount || 0
@@ -382,6 +395,8 @@ export default function DashboardPage() {
   const depPeriod = kpiPeriod
   const revPeriod = kpiPeriod
   const [revMode, setRevMode] = useState<"total" | "types">("total")
+  const [revKpiMode, setRevKpiMode] = useState<"rev" | "ca">("rev")
+  const [rentaMode, setRentaMode] = useState<"projects" | "types">("projects")
   const [chargesMode, setChargesMode] = useState<"all" | "depenses" | "salaires">("all")
   // Toggles Past/Future/Custom pour chart Revenus mensuels
   const [revViewMode, setRevViewMode] = useState<"past" | "future" | "custom">("past")
@@ -407,6 +422,7 @@ export default function DashboardPage() {
   // Modal states
   const [editProject, setEditProject] = useState<Project | null>(null)
   const [editProjectMissing, setEditProjectMissing] = useState<string[] | undefined>(undefined)
+  const [commissionnaireDetail, setCommissionnaireDetail] = useState<string | null>(null)
   const [editDepense, setEditDepense] = useState<Depense | null>(null)
   const [showAddVente, setShowAddVente] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -524,18 +540,27 @@ export default function DashboardPage() {
     return depenses.filter(d => dossierInFiscalYear(d.dossier, fyStartYear))
   }, [depenses, depPeriod, currentDossier, fq, fyStartYear])
 
+  // Les KPIs en haut concernent UNIQUEMENT les revenus actuels (kind === "actual",
+  // c-a-d projets dont la date de référence ≤ mois courant). Les forecasts ne sont
+  // pas dans ces KPIs.
   const revFilteredProjects = useMemo(() => {
-    const wonProjects = projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status))
-    if (revPeriod === "all") return wonProjects
-    if (revPeriod === "month") return wonProjects.filter(p => dossierFromDate(getRevenueDateISO(p)) === currentDossier)
-    if (revPeriod === "quarter") return wonProjects.filter(p => { const k = dossierFromDate(getRevenueDateISO(p)); return k >= fq.startCode && k <= fq.endCode })
-    return wonProjects.filter(p => dossierInFiscalYear(dossierFromDate(getRevenueDateISO(p)), fyStartYear))
+    const actualProjects = projects.filter(p => {
+      const r = computeProjectRevenue(p)
+      return r?.kind === "actual"
+    })
+    if (revPeriod === "all") return actualProjects
+    if (revPeriod === "month") return actualProjects.filter(p => dossierFromDate(getRevenueDateISO(p)) === currentDossier)
+    if (revPeriod === "quarter") return actualProjects.filter(p => { const k = dossierFromDate(getRevenueDateISO(p)); return k >= fq.startCode && k <= fq.endCode })
+    return actualProjects.filter(p => dossierInFiscalYear(dossierFromDate(getRevenueDateISO(p)), fyStartYear))
   }, [projects, revPeriod, currentDossier, fq, fyStartYear])
 
   const depTotal = useMemo(() => depFiltered.reduce((s, d) => s + d.montantMUR, 0), [depFiltered])
   const depTotalAll = useMemo(() => depenses.reduce((s, d) => s + d.montantMUR, 0), [depenses])
-  const revTotalAll = useMemo(() => projects.filter(p => ["Won", "Active", "Completed", "Won orally"].includes(p.status)).reduce((s, p) => s + getRevenueMUR(p), 0), [projects])
+  const revTotalAll = useMemo(() => {
+    return projects.filter(p => computeProjectRevenue(p)?.kind === "actual").reduce((s, p) => s + getRevenueMUR(p), 0)
+  }, [projects])
   const revTotal = useMemo(() => revFilteredProjects.reduce((s, p) => s + getRevenueMUR(p), 0), [revFilteredProjects])
+  const caTotal = useMemo(() => revFilteredProjects.reduce((s, p) => s + getCAMUR(p), 0), [revFilteredProjects])
   const totalProfit = revTotal - depTotal
   const avgMargin = revTotal > 0 ? ((totalProfit / revTotal) * 100) : 0
   const projetsActifs = useMemo(() => projects.filter(p => p.status === "Active").length, [projects])
@@ -550,30 +575,72 @@ export default function DashboardPage() {
   const depPeriodLabel = periodLabel(depPeriod)
   const revPeriodLabel = periodLabel(revPeriod)
 
-  // Salaires : début = mars 2026 ("2603")
-  const SALAIRE_START_CODE = "2603"
-  const salaireMensuel = useMemo(() => employees.reduce((s, e) => s + (e.cje || 0) * 220 / 12, 0), [employees])
+  // ─── Salaires per-employee per-mois ─────────────────────────────────────────
+  //
+  // Règles :
+  //   - Pas de "Date Premier Salaire" → employé ignoré (cas data quality).
+  //   - Mois < dossier(dateFirstSalary) → 0 (pas encore actif).
+  //   - Mois > dossier(endDate) → 0 (parti).
+  //   - role === "Intern" / "Stagiaire" → 0 (coût passé via dépenses factures).
+  //   - Pays Maurice → 13e mois en décembre (×2 sur le mois "12").
+  //   - Coût mensuel = CJE × 220/12 (220 jours ouvrés/an).
+  const SALAIRE_DAYS_PER_YEAR = 220
+  const dossierFromDateLocal = (iso: string): string => {
+    if (!iso) return ""
+    const d = new Date(iso)
+    if (isNaN(d.getTime())) return ""
+    return `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+  }
+  const salaireForMonth = useCallback((yymm: string): number => {
+    if (!yymm || yymm.length !== 4) return 0
+    const is13thMonth = yymm.endsWith("12")
+    return employees.reduce((sum, e) => {
+      // Stagiaires exclus
+      if (e.role === "Intern" || e.role === "Stagiaire") return sum
+      // Sans Date Premier Salaire → pas comptabilisé
+      if (!e.dateFirstSalary) return sum
+      const startCode = dossierFromDateLocal(e.dateFirstSalary)
+      if (!startCode) return sum
+      if (yymm < startCode) return sum
+      // Sortie passée
+      if (e.endDate) {
+        const endCode = dossierFromDateLocal(e.endDate)
+        if (endCode && yymm > endCode) return sum
+      }
+      const base = (e.cje || 0) * SALAIRE_DAYS_PER_YEAR / 12
+      const bonus = is13thMonth && e.country === "Maurice" ? base : 0
+      return sum + base + bonus
+    }, 0)
+  }, [employees])
 
-  // Dépenses récurrentes critiques : montant mensuel à projeter dans le futur
-  // Déduplication par (fournisseur + description + catégorie), on prend la dernière occurrence
+  // Salaire "headline" du mois courant — préservé pour PrevisionnelView et displays.
+  const salaireMensuel = useMemo(() => salaireForMonth(currentDossier), [salaireForMonth, currentDossier])
+
+  // ─── Dépenses récurrentes critiques (mensuel) ───────────────────────────────
+  //
+  // Dédup par (priorité abonnement, fallback fournisseur+description+catégorie).
+  // Recurrence "Annuel" → coût ÷ 12 par mois ; "Mensuel" ou vide → ×1.
+  // On prend la valeur la plus récente par clé canonique.
   const recurringCriticalMensuel = useMemo(() => {
-    const uniq: Record<string, { key: string; date: string; montantMUR: number }> = {}
+    interface RcEntry { key: string; date: string; monthlyMUR: number }
+    const uniq: Record<string, RcEntry> = {}
     depenses.filter(d => d.recurringCritical).forEach(d => {
-      const key = [d.fournisseur || "", d.description || "", d.categorie || ""].map(s => s.trim().toLowerCase()).join("|")
-      const cur = uniq[key]
-      // Garde la plus récente
+      const canonicalKey = (d.abonnement && d.abonnement.trim())
+        || [d.fournisseur || "", d.description || "", d.categorie || ""].map(s => s.trim().toLowerCase()).join("|")
+      const factor = (d.recurrence === "Annuel") ? (1 / 12) : 1
+      const monthlyMUR = (d.montantMUR || 0) * factor
+      const cur = uniq[canonicalKey]
       if (!cur || (d.date || "") > cur.date) {
-        uniq[key] = { key, date: d.date || "", montantMUR: d.montantMUR || 0 }
+        uniq[canonicalKey] = { key: canonicalKey, date: d.date || "", monthlyMUR }
       }
     })
-    return Object.values(uniq).reduce((s, v) => s + v.montantMUR, 0)
+    return Object.values(uniq).reduce((s, v) => s + v.monthlyMUR, 0)
   }, [depenses])
 
-  // Nombre de mois "salariés" (>= 2603 et <= currentDossier) inclus dans une période
-  const computeSalariedMonths = useCallback((period: "all" | "year" | "quarter" | "month"): number => {
+  // ─── Codes mois salariés et totaux par période ──────────────────────────────
+  const codesForSalaryPeriod = useCallback((period: "all" | "year" | "quarter" | "month"): string[] => {
     const curCode = currentDossier
-    if (period === "month") return curCode >= SALAIRE_START_CODE ? 1 : 0
-    // Construire la liste des codes YYMM couverts
+    if (period === "month") return [curCode]
     const codes: string[] = []
     const pushRange = (fromY: number, fromM: number, toY: number, toM: number) => {
       let y = fromY, m = fromM
@@ -583,10 +650,9 @@ export default function DashboardPage() {
       }
     }
     if (period === "all") {
-      // Du 2603 à current
-      pushRange(26, 3, parseInt(curCode.slice(0, 2), 10), parseInt(curCode.slice(2), 10))
+      // Le plus ancien code possible — on filtrera par dateFirstSalary employé.
+      pushRange(20, 1, parseInt(curCode.slice(0, 2), 10), parseInt(curCode.slice(2), 10))
     } else if (period === "year") {
-      // FY : juillet fyStartYear → juin fyStartYear+1, limité à current
       const fyStartYY = fyStartYear % 100
       pushRange(fyStartYY, 7, fyStartYY + 1, 6)
     } else if (period === "quarter") {
@@ -596,11 +662,21 @@ export default function DashboardPage() {
       const toM = parseInt(fq.endCode.slice(2), 10)
       pushRange(fromY, fromM, toY, toM)
     }
-    return codes.filter(c => c >= SALAIRE_START_CODE && c <= curCode).length
+    return codes.filter(c => c <= curCode)
   }, [currentDossier, fyStartYear, fq])
 
-  const salairesForDepPeriod = useMemo(() => salaireMensuel * computeSalariedMonths(depPeriod), [salaireMensuel, computeSalariedMonths, depPeriod])
-  const salairesForRevPeriod = useMemo(() => salaireMensuel * computeSalariedMonths(revPeriod), [salaireMensuel, computeSalariedMonths, revPeriod])
+  // Backward-compat : nombre de mois salariés (utilisé ailleurs)
+  const computeSalariedMonths = useCallback((period: "all" | "year" | "quarter" | "month"): number =>
+    codesForSalaryPeriod(period).length,
+  [codesForSalaryPeriod])
+
+  // Total salaire pour une période — somme par-mois (respecte les règles per-employee)
+  const salaireTotalForPeriod = useCallback((period: "all" | "year" | "quarter" | "month"): number =>
+    codesForSalaryPeriod(period).reduce((s, c) => s + salaireForMonth(c), 0),
+  [codesForSalaryPeriod, salaireForMonth])
+
+  const salairesForDepPeriod = useMemo(() => salaireTotalForPeriod(depPeriod), [salaireTotalForPeriod, depPeriod])
+  const salairesForRevPeriod = useMemo(() => salaireTotalForPeriod(revPeriod), [salaireTotalForPeriod, revPeriod])
   const chargesTotal = depTotal + salairesForDepPeriod
   const avgMarginWithSalaries = revTotal > 0 ? ((revTotal - chargesTotal) / revTotal) * 100 : 0
 
@@ -667,7 +743,7 @@ export default function DashboardPage() {
         return {
           dossier,
           label: fmtDossier(dossier),
-          Salaires: dossier >= SALAIRE_START_CODE ? salaireMensuel : 0,
+          Salaires: salaireForMonth(dossier),
           "Récurrent critique": recurringCriticalMensuel,
           isFuture: true,
         }
@@ -675,7 +751,7 @@ export default function DashboardPage() {
       return {
         dossier,
         label: fmtDossier(dossier),
-        Salaires: dossier >= SALAIRE_START_CODE ? salaireMensuel : 0,
+        Salaires: salaireForMonth(dossier),
         isFuture: false,
         ...cats,
       }
@@ -879,10 +955,13 @@ export default function DashboardPage() {
     return { nbFuture, nbPast, total: revChartRange.filled.length }
   }, [revChartRange, currentDossier])
 
+  // ISO YYYY-MM-DD du jour — borne pour les Tops "passé uniquement".
+  const todayISO = new Date().toISOString().slice(0, 10)
+
   const allFourn = useMemo(() => {
-    // Pour chaque fournisseur: total + catégorie dominante (max en MUR) + nb de dépenses
+    // Top fournisseurs : uniquement dépenses déjà passées (d.date <= todayISO).
     const m: Record<string, { value: number; catTotals: Record<string, number>; count: number }> = {}
-    depenses.forEach(d => {
+    depenses.filter(d => d.date && d.date <= todayISO).forEach(d => {
       if (!d.fournisseur) return
       if (!m[d.fournisseur]) m[d.fournisseur] = { value: 0, catTotals: {}, count: 0 }
       m[d.fournisseur].value += d.montantMUR
@@ -915,15 +994,18 @@ export default function DashboardPage() {
   }, [allProjectTypes])
 
   const allClients = useMemo(() => {
+    // Top clients : uniquement projets actuels (kind === "actual" via computeProjectRevenue).
+    // Lost/Cancelled exclus naturellement (computeProjectRevenue retourne null).
     const m: Record<string, { value: number; count: number; projects: Project[]; byType: Record<string, number> }> = {}
-    projects.filter(p => !["Lost", "Cancelled"].includes(p.status) && p.clientName && p.clientName !== "N/A").forEach(p => {
+    projects.filter(p => p.clientName && p.clientName !== "N/A").forEach(p => {
+      const r = computeProjectRevenue(p)
+      if (!r || r.kind !== "actual") return
       if (!m[p.clientName]) m[p.clientName] = { value: 0, count: 0, projects: [], byType: {} }
-      const amt = getRevenueMUR(p)
-      m[p.clientName].value += amt
+      m[p.clientName].value += r.netMUR
       m[p.clientName].count += 1
       m[p.clientName].projects.push(p)
       const type = p.type || "N/A"
-      m[p.clientName].byType[type] = (m[p.clientName].byType[type] || 0) + amt
+      m[p.clientName].byType[type] = (m[p.clientName].byType[type] || 0) + r.netMUR
     })
     return Object.entries(m).map(([name, v]) => {
       // Spread byType directement sur l'objet pour que Recharts puisse stacker
@@ -953,6 +1035,24 @@ export default function DashboardPage() {
         currency: p.currency,
       }))
   , [projects])
+
+  // Rentabilité agrégée par type — gros points pour la moyenne, taille = nb projets
+  const rentaByType = useMemo(() => {
+    const groups: Record<string, { xs: number[]; ys: number[]; count: number }> = {}
+    rentaData.forEach(p => {
+      if (!groups[p.type]) groups[p.type] = { xs: [], ys: [], count: 0 }
+      groups[p.type].xs.push(p.x)
+      groups[p.type].ys.push(p.y)
+      groups[p.type].count++
+    })
+    return Object.entries(groups).map(([type, g]) => ({
+      name: `${type} (${g.count} projet${g.count > 1 ? "s" : ""})`,
+      type,
+      x: g.xs.reduce((s, v) => s + v, 0) / g.count,
+      y: g.ys.reduce((s, v) => s + v, 0) / g.count,
+      z: g.count,
+    }))
+  }, [rentaData])
 
   // Hero
   const heroData = useMemo(() => {
@@ -1028,7 +1128,7 @@ export default function DashboardPage() {
       const ca = rMCa[m] || 0
       const commission = Math.max(0, ca - revNet)
       const dep = dM[m] || 0
-      const sal = m >= SALAIRE_START_CODE ? salaireMensuel : 0
+      const sal = salaireForMonth(m)
       const depVal = isFuture ? recurringCriticalMensuel : dep
       const ebitda = revNet - depVal - sal
       // Passé inclut le mois courant ; Futur inclut aussi le mois courant → point partagé pour lisser la transition
@@ -1250,8 +1350,8 @@ export default function DashboardPage() {
     const depFuture = nbFutureInRange * recurringCriticalMensuel
     const depTotalRange = depPast + depFuture
     // Salaires : nb mois dans la plage qui sont >= 2603
-    const nbSalariedMonths = codes.filter(c => c >= "2603").length
-    const salTotalRange = salaireMensuel * nbSalariedMonths
+    // Salaire total sur la plage : somme per-mois (respecte per-employee dateFirstSalary + Maurice 13e).
+    const salTotalRange = codes.reduce((s, c) => s + salaireForMonth(c), 0)
     const chargesRange = depTotalRange + salTotalRange
 
     // Indicateurs PNL
@@ -1470,18 +1570,21 @@ export default function DashboardPage() {
 
           {/* ── KPIs ── */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
-            {/* Revenus card with toggle */}
+            {/* Revenus card avec toggle CA/Revenu (revenus actuels uniquement, projets passés) */}
             <div style={card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>Revenus</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>{revKpiMode === "rev" ? "Revenu" : "CA"}</div>
+                  <Seg value={revKpiMode} onChange={v => setRevKpiMode(v as any)} options={[["rev", "Revenu"], ["ca", "CA"]]} />
+                </div>
                 <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(166,201,206,0.15)", border: "1px solid rgba(166,201,206,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>💰</div>
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                <span style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)", letterSpacing: "-0.03em", lineHeight: 1 }}>{Math.round(revTotal).toLocaleString("fr-FR")}</span>
+                <span style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)", letterSpacing: "-0.03em", lineHeight: 1 }}>{Math.round(revKpiMode === "rev" ? revTotal : caTotal).toLocaleString("fr-FR")}</span>
                 <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>MUR</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
-                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{revPeriodLabel}</div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{revPeriodLabel} · projets passés</div>
                 <Seg value={kpiPeriod} onChange={v => setKpiPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
               </div>
             </div>
@@ -1557,7 +1660,7 @@ export default function DashboardPage() {
               }
               value={
                 <span style={{ display: "inline-flex", flexDirection: "column", alignItems: "flex-start", gap: 4 }}>
-                  <span>{`${Math.round(depTotalAll + salaireMensuel * computeSalariedMonths("all")).toLocaleString("fr-FR")} MUR`}</span>
+                  <span>{`${Math.round(depTotalAll + salaireTotalForPeriod("all")).toLocaleString("fr-FR")} MUR`}</span>
                   <span style={{ display: "inline-flex", gap: 10, fontSize: "var(--fs-2xs)", fontWeight: 500, fontFamily: "inherit" }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "#ef4444" }}>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ef4444", display: "inline-block" }} />
@@ -1566,7 +1669,7 @@ export default function DashboardPage() {
                     </span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, color: "#f97316" }}>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#f97316", display: "inline-block" }} />
-                      <span style={{ fontFamily: "monospace" }}>{Math.round(salaireMensuel * computeSalariedMonths("all")).toLocaleString("fr-FR")}</span>
+                      <span style={{ fontFamily: "monospace" }}>{Math.round(salaireTotalForPeriod("all")).toLocaleString("fr-FR")}</span>
                       <span style={{ color: "var(--text-muted)" }}>sal</span>
                     </span>
                   </span>
@@ -1608,6 +1711,7 @@ export default function DashboardPage() {
                             })}
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
                           <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
                           <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                           <Tooltip content={<CTooltip formatter={fmt} />} />
@@ -1729,6 +1833,7 @@ export default function DashboardPage() {
                       })}
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
                     <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                     <Tooltip content={<CTooltip formatter={fmt} />} />
@@ -1851,6 +1956,7 @@ export default function DashboardPage() {
                             })}
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
                           <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
                           <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                           <Tooltip content={<RevenueTooltip ventesListByMois={{ ...ventesListByMois, __showAll: true } as any} />} />
@@ -1981,6 +2087,7 @@ export default function DashboardPage() {
                       })}
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
                     <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
                     <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                     <Tooltip content={<RevenueTooltip ventesListByMois={ventesListByMois} />} />
@@ -2088,6 +2195,7 @@ export default function DashboardPage() {
                 <ResponsiveContainer width="100%" height={Math.max(260, topData.length * 32)}>
                   <BarChart data={topData as any[]} layout="vertical" margin={{ left: 20 }} style={{ cursor: "pointer" }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
                     <XAxis type="number" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                     <YAxis type="category" dataKey="name" tick={{ fill: "var(--text-secondary)", fontSize: 10 }} width={130} axisLine={false} tickLine={false} />
                     <Tooltip content={<TopBarTooltip mode={topMode} types={allProjectTypes} typeColors={allProjectTypes.map((_, i) => PIE_TYPE[i % PIE_TYPE.length])} />} />
@@ -2122,15 +2230,24 @@ export default function DashboardPage() {
               </div>
             </ChartCard>
 
-            <ChartCard title="Rentabilité projets" sub="Montant vs marge — couleur = type de projet">
+            <ChartCard
+              title="Rentabilité projets"
+              sub={rentaMode === "projects" ? "Montant vs marge — couleur = type" : "Moyenne par type — taille = nb projets"}
+              right={<Seg value={rentaMode} onChange={v => setRentaMode(v as any)} options={[["projects", "Par projet"], ["types", "Par type"]]} />}
+            >
               <ResponsiveContainer width="100%" height={260}>
                 <ScatterChart margin={{ left: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
                   <XAxis type="number" dataKey="x" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                   <YAxis type="number" dataKey="y" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} unit="%" />
-                  <ZAxis range={[60, 200]} />
+                  <ZAxis type="number" dataKey="z" range={rentaMode === "types" ? [200, 900] : [60, 200]} />
                   <Tooltip content={<RentaTooltip />} />
-                  <Scatter data={rentaData} fill="#A6C9CE">{rentaData.map((e, i) => <Cell key={i} fill={projectTypeColors[e.type] || "#A6C9CE"} />)}</Scatter>
+                  {rentaMode === "projects" ? (
+                    <Scatter data={rentaData} fill="#A6C9CE">{rentaData.map((e, i) => <Cell key={i} fill={projectTypeColors[e.type] || "#A6C9CE"} />)}</Scatter>
+                  ) : (
+                    <Scatter data={rentaByType} fill="#A6C9CE">{rentaByType.map((e, i) => <Cell key={i} fill={projectTypeColors[e.type] || "#A6C9CE"} />)}</Scatter>
+                  )}
                 </ScatterChart>
               </ResponsiveContainer>
               {/* Légende types */}
@@ -2351,7 +2468,13 @@ export default function DashboardPage() {
                   </thead>
                   <tbody>
                     {cashData.beneficiaires.map((b, i) => (
-                      <tr key={b.name} style={{ borderBottom: i < cashData.beneficiaires.length - 1 ? "1px solid rgba(166,201,206,0.05)" : undefined }}>
+                      <tr
+                        key={b.name}
+                        onClick={() => setCommissionnaireDetail(b.name)}
+                        style={{ borderBottom: i < cashData.beneficiaires.length - 1 ? "1px solid rgba(166,201,206,0.05)" : undefined, cursor: "pointer", transition: "background 0.15s" }}
+                        onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")}
+                        onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                      >
                         <td style={{ ...tdStyle, fontWeight: 500 }}>
                           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                             <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#f97316" }} />
@@ -2577,6 +2700,51 @@ export default function DashboardPage() {
           onSelectDepense={(d) => { setTopDetailItem(null); setEditDepense(d) }}
         />
       )}
+
+      {commissionnaireDetail && (() => {
+        const list = projects.filter(p => (p.commissionTo || "").trim() === commissionnaireDetail)
+        const totalCA = list.reduce((s, p) => s + getCAMUR(p), 0)
+        const totalCom = list.reduce((s, p) => s + getCommissionMUR(p), 0)
+        return (
+          <div style={modalOverlay} onClick={() => setCommissionnaireDetail(null)}>
+            <div style={{ ...modalBox, maxWidth: 760 }} onClick={e => e.stopPropagation()}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700 }}>Commissions — {commissionnaireDetail}</div>
+                  <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 4 }}>
+                    {list.length} projet{list.length > 1 ? "s" : ""} · CA total {Math.round(totalCA).toLocaleString("fr-FR")} MUR · Commission totale {Math.round(totalCom).toLocaleString("fr-FR")} MUR
+                  </div>
+                </div>
+                <button onClick={() => setCommissionnaireDetail(null)} style={{ background: "transparent", border: "1px solid var(--border-subtle)", color: "var(--text-muted)", cursor: "pointer", padding: "4px 10px", borderRadius: "var(--radius-btn)", fontSize: "var(--fs-xs)" }}>✕</button>
+              </div>
+              <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+                  <thead>
+                    <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                      <th style={thStyle}>Projet</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>CA (MUR)</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>Taux</th>
+                      <th style={{ ...thStyle, textAlign: "right" }}>Commission (MUR)</th>
+                      <th style={thStyle}>Date fin</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {list.sort((a, b) => getCommissionMUR(b) - getCommissionMUR(a)).map(p => (
+                      <tr key={p.id} onClick={() => { setCommissionnaireDetail(null); setEditProject(p) }} style={{ borderBottom: "1px solid rgba(166,201,206,0.06)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                        <td style={{ ...tdStyle, fontWeight: 500 }}>{p.name}<div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{p.clientName}</div></td>
+                        <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace" }}>{Math.round(getCAMUR(p)).toLocaleString("fr-FR")}</td>
+                        <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace", color: "var(--text-muted)" }}>{(getCommissionRate(p) * 100).toFixed(1)} %</td>
+                        <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#f97316" }}>{Math.round(getCommissionMUR(p)).toLocaleString("fr-FR")}</td>
+                        <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{p.endDate || p.startDate || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -3623,6 +3791,7 @@ function PrevisionnelView({ heroData, projects, employees, depenses, recurringCr
                 <linearGradient id="gDepPv" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ef4444" stopOpacity={0.35} /><stop offset="95%" stopColor="#ef4444" stopOpacity={0.02} /></linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
+                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
               <ReferenceLine y={0} stroke="rgba(255,255,255,0.35)" strokeWidth={1} ifOverflow="extendDomain" {...({ isFront: false } as any)} />
               <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />
@@ -3772,6 +3941,7 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
         <ResponsiveContainer width="100%" height={height as any}>
           <BarChart data={heroData} margin={{ left: 10, right: 10 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.06)" />
+            <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
             <ReferenceLine y={0} stroke="rgba(255,255,255,0.35)" strokeWidth={1} ifOverflow="extendDomain" {...({ isFront: false } as any)} />
             <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
             <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />
@@ -3801,6 +3971,7 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
           <linearGradient id="gRev" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#A6C9CE" stopOpacity={0.35} /><stop offset="95%" stopColor="#A6C9CE" stopOpacity={0.02} /></linearGradient>
         </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.06)" />
+            <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
         <ReferenceLine y={0} stroke="rgba(255,255,255,0.35)" strokeWidth={1} ifOverflow="extendDomain" {...({ isFront: false } as any)} />
         <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
         <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />

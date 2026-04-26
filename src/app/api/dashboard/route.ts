@@ -103,7 +103,7 @@ export async function GET() {
 
     // Build employees lookup + structured list (CJE, dates)
     const employeesMap: Record<string, string> = {}
-    const employees: Array<{ id: string; name: string; cje: number; startDate: string; endDate: string; role: string }> = []
+    const employees: Array<{ id: string; name: string; cje: number; startDate: string; endDate: string; role: string; country: string; dateFirstSalary: string }> = []
     for (const e of employeesRaw) {
       const props = e.properties as Record<string, any>
       const titleProp = Object.values(props).find((p: any) => p.type === "title") as any
@@ -119,7 +119,9 @@ export async function GET() {
       const startDate = getDate(props["Date d'entrée"] || props["Start Date"] || props["Date début"] || {})
       const endDate = getDate(props["Date de sortie"] || props["End Date"] || props["Date fin"] || {})
       const role = getSelect(props["Role"] || props["Rôle"] || {}) || getText(props["Role"] || props["Rôle"] || {})
-      employees.push({ id: e.id, name, cje, startDate, endDate, role })
+      const country = getSelect(props["Country"] || props["Pays"] || {})
+      const dateFirstSalary = getDate(props["Date Premier Salaire"] || props["Date premier salaire"] || props["First Salary Date"] || {})
+      employees.push({ id: e.id, name, cje, startDate, endDate, role, country, dateFirstSalary })
     }
 
     // Parse projects
@@ -223,6 +225,10 @@ export async function GET() {
       // Recurring Critical (checkbox) — dépenses à projeter dans le futur
       const rcProp = props["Recurring Critical"] || props["Récurrent critique"] || props["Critical Recurring"]
       const recurringCritical = rcProp?.type === "checkbox" ? !!rcProp.checkbox : !!(rcProp?.checkbox ?? false)
+      // Abonnement (Select) : nom canonique pour dédup recurring critical
+      const abonnement = getSelect(props["Abonnement"] || props["Subscription"] || {})
+      // Récurrence (Select) : "Mensuel" / "Annuel" — pilote le facteur mensuel
+      const recurrence = getSelect(props["Récurrence"] || props["Recurrence"] || props["Periodicité"] || {})
       return {
         id: d.id,
         description: getText(props["Description"]),
@@ -236,6 +242,8 @@ export async function GET() {
         dossier: getText(props["Dossier"]),
         payePar: payeParName,
         recurringCritical,
+        abonnement,
+        recurrence,
       }
     })
 
