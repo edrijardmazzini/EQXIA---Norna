@@ -1554,16 +1554,16 @@ export default function DashboardPage() {
 
           {activeTab === "previsionnel" ? (
             <PrevisionnelView
-              heroData={heroData.filter(d => d.isFuture || d.isCurrent)}
               projects={projects}
               employees={employees}
               depenses={depenses}
               recurringCriticalMensuel={recurringCriticalMensuel}
               salaireMensuel={salaireMensuel}
-              projectedTotals={{ ca: heroProjectedCA, rev: heroProjectedRev, dep: heroProjectedDep, sal: heroProjectedSal, ebitda: heroProjectedEbitda }}
+              salaireForMonth={salaireForMonth}
               onEditProject={(p: Project) => setEditProject(p)}
               onEditDepense={(d: Depense) => setEditDepense(d)}
               currentDossier={currentDossier}
+              fyStartYear={fyStartYear}
             />
           ) : (
           <>
@@ -1571,7 +1571,7 @@ export default function DashboardPage() {
           {/* ── KPIs ── */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
             {/* Revenus card avec toggle CA/Revenu (revenus actuels uniquement, projets passés) */}
-            <div style={card}>
+            <div style={{ ...card, display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>{revKpiMode === "rev" ? "Revenu" : "CA"}</div>
@@ -1583,25 +1583,34 @@ export default function DashboardPage() {
                 <span style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)", letterSpacing: "-0.03em", lineHeight: 1 }}>{Math.round(revKpiMode === "rev" ? revTotal : caTotal).toLocaleString("fr-FR")}</span>
                 <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>MUR</span>
               </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8 }}>
+              <div style={{ marginTop: "auto", paddingTop: 8 }}>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{revPeriodLabel} · projets passés</div>
-                <Seg value={kpiPeriod} onChange={v => setKpiPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
+                <div style={{ marginTop: 6 }}>
+                  <Seg value={kpiPeriod} onChange={v => setKpiPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
+                </div>
               </div>
             </div>
 
-            <KpiCard
-              icon="📉"
-              iconBg="rgba(166,201,206,0.15)"
-              iconBorder="rgba(166,201,206,0.3)"
-              label="Average Margin"
-              value={`${avgMarginWithSalaries.toFixed(1)}%`}
-              unit=""
-              sub={`Rev − Charges (${periodLabel(kpiPeriod)})`}
-              valueColor={avgMarginWithSalaries >= 0 ? "var(--accent)" : "var(--color-error)"}
-            />
+            {/* Average Margin card — inlined pour ajouter le Seg en bas, aligné avec les 2 autres */}
+            <div style={{ ...card, display: "flex", flexDirection: "column" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>Average Margin</div>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(166,201,206,0.15)", border: "1px solid rgba(166,201,206,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>📉</div>
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                <span style={{ fontSize: 28, fontWeight: 800, color: avgMarginWithSalaries >= 0 ? "var(--accent)" : "var(--color-error)", letterSpacing: "-0.03em", lineHeight: 1 }}>{avgMarginWithSalaries.toFixed(1)}</span>
+                <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>%</span>
+              </div>
+              <div style={{ marginTop: "auto", paddingTop: 8 }}>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>Rev − Charges · {periodLabel(kpiPeriod)}</div>
+                <div style={{ marginTop: 6 }}>
+                  <Seg value={kpiPeriod} onChange={v => setKpiPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
+                </div>
+              </div>
+            </div>
 
-            {/* Charges (Dépenses + Salaires) card with toggle — aligné avec les autres KpiCard */}
-            <div style={card}>
+            {/* Charges (Dépenses + Salaires) card — Seg sur ligne dédiée en bas */}
+            <div style={{ ...card, display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>Charges (Dépenses &amp; Salaires)</div>
                 <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>💸</div>
@@ -1613,9 +1622,11 @@ export default function DashboardPage() {
               <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontFamily: "monospace", marginTop: 6 }}>
                 {Math.round(salairesForDepPeriod).toLocaleString("fr-FR")} <span style={{ color: "#f97316" }}>sal</span> + {Math.round(depTotal).toLocaleString("fr-FR")} <span style={{ color: "#ef4444" }}>dép</span>
               </div>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6 }}>
+              <div style={{ marginTop: "auto", paddingTop: 8 }}>
                 <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{depPeriodLabel}</div>
-                <Seg value={kpiPeriod} onChange={v => setKpiPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
+                <div style={{ marginTop: 6 }}>
+                  <Seg value={kpiPeriod} onChange={v => setKpiPeriod(v as any)} options={[["all", "All"], ["year", "A"], ["quarter", "T"], ["month", "M"]]} />
+                </div>
               </div>
             </div>
 
@@ -1711,7 +1722,6 @@ export default function DashboardPage() {
                             })}
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
-                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
                           <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
                           <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                           <Tooltip content={<CTooltip formatter={fmt} />} />
@@ -1833,9 +1843,8 @@ export default function DashboardPage() {
                       })}
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
-                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
-                    <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+                    <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                     <Tooltip content={<CTooltip formatter={fmt} />} />
                     {/* Salaires en base (hors mode depenses) */}
                     {chargesMode !== "depenses" && (
@@ -1856,7 +1865,12 @@ export default function DashboardPage() {
             <ChartCard
               title="Dépenses par catégorie"
               sub={(() => {
-                const pluralize = (n: number, s: string) => `${n} ${s}${n > 1 ? "s" : ""}`
+                // "mois" est invariable au pluriel — ne pas ajouter le 's' final
+                const pluralize = (n: number, s: string) => {
+                  const invariables = new Set(["mois", "fois", "pas"])
+                  const suffix = invariables.has(s) || n <= 1 ? "" : "s"
+                  return `${n} ${s}${suffix}`
+                }
                 if (depParCatMeta.nbFuture > 0 && depParCatMeta.nbPast > 0) return `Plage : ${pluralize(depParCatMeta.nbPast, "passé")} + ${pluralize(depParCatMeta.nbFuture, "projeté")}`
                 if (depParCatMeta.nbFuture > 0) return `Plage : ${pluralize(depParCatMeta.nbFuture, "mois projeté")}`
                 return `Plage : ${pluralize(depParCatMeta.nbPast, "mois")}`
@@ -1956,7 +1970,6 @@ export default function DashboardPage() {
                             })}
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
-                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
                           <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} />
                           <YAxis tick={{ fill: "var(--text-muted)", fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                           <Tooltip content={<RevenueTooltip ventesListByMois={{ ...ventesListByMois, __showAll: true } as any} />} />
@@ -2087,9 +2100,8 @@ export default function DashboardPage() {
                       })}
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
-                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
-                    <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+                    <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
                     <Tooltip content={<RevenueTooltip ventesListByMois={ventesListByMois} />} />
                     {revMode === "total" ? (
                       <>
@@ -2114,7 +2126,12 @@ export default function DashboardPage() {
             <ChartCard
               title="Revenus par type de projet"
               sub={(() => {
-                const pluralize = (n: number, s: string) => `${n} ${s}${n > 1 ? "s" : ""}`
+                // "mois" est invariable au pluriel — ne pas ajouter le 's' final
+                const pluralize = (n: number, s: string) => {
+                  const invariables = new Set(["mois", "fois", "pas"])
+                  const suffix = invariables.has(s) || n <= 1 ? "" : "s"
+                  return `${n} ${s}${suffix}`
+                }
                 if (projParTypeMeta.nbFuture > 0 && projParTypeMeta.nbPast > 0) return `Plage : ${pluralize(projParTypeMeta.nbPast, "passé")} + ${pluralize(projParTypeMeta.nbFuture, "projeté")}`
                 if (projParTypeMeta.nbFuture > 0) return `Plage : ${pluralize(projParTypeMeta.nbFuture, "mois projeté")}`
                 return `Plage : ${pluralize(projParTypeMeta.nbPast, "mois")}`
@@ -2195,9 +2212,8 @@ export default function DashboardPage() {
                 <ResponsiveContainer width="100%" height={Math.max(260, topData.length * 32)}>
                   <BarChart data={topData as any[]} layout="vertical" margin={{ left: 20 }} style={{ cursor: "pointer" }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
-                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
-                    <XAxis type="number" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-                    <YAxis type="category" dataKey="name" tick={{ fill: "var(--text-secondary)", fontSize: 10 }} width={130} axisLine={false} tickLine={false} />
+                    <XAxis type="number" tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+                    <YAxis type="category" dataKey="name" tick={{ fill: "var(--text-secondary)", fontSize: 12 }} width={130} axisLine={false} tickLine={false} />
                     <Tooltip content={<TopBarTooltip mode={topMode} types={allProjectTypes} typeColors={allProjectTypes.map((_, i) => PIE_TYPE[i % PIE_TYPE.length])} />} />
                     {topMode === "clients" ? (
                       allProjectTypes.map((t, i) => (
@@ -2238,9 +2254,8 @@ export default function DashboardPage() {
               <ResponsiveContainer width="100%" height={260}>
                 <ScatterChart margin={{ left: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
-                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
-                  <XAxis type="number" dataKey="x" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
-                  <YAxis type="number" dataKey="y" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} unit="%" />
+                  <XAxis type="number" dataKey="x" tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={fmtK} />
+                  <YAxis type="number" dataKey="y" tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} unit="%" />
                   <ZAxis type="number" dataKey="z" range={rentaMode === "types" ? [200, 900] : [60, 200]} />
                   <Tooltip content={<RentaTooltip />} />
                   {rentaMode === "projects" ? (
@@ -3734,31 +3749,146 @@ function Badge({ c, l, v }: { c: string; l: string; v: string }) {
 }
 
 // ───────── Onglet Prévisionnel : charts futurs + listings modifiables ─────────
-function PrevisionnelView({ heroData, projects, employees, depenses, recurringCriticalMensuel, salaireMensuel, projectedTotals, onEditProject, onEditDepense, currentDossier }: any) {
-  // Futur = mois > currentDossier
+function PrevisionnelView({ projects, employees, depenses, recurringCriticalMensuel, salaireMensuel, salaireForMonth, onEditProject, onEditDepense, currentDossier, fyStartYear }: any) {
+  type FutureRange = "1m" | "3m" | "6m" | "12m" | "fy"
+  const [futureRange, setFutureRange] = useState<FutureRange>("fy")
+
+  // Codes YYMM couverts par la plage future, mois courant inclus
+  const codes = useMemo(() => {
+    if (!currentDossier || currentDossier.length !== 4) return [] as string[]
+    const curY = parseInt(currentDossier.slice(0, 2), 10)
+    const curM = parseInt(currentDossier.slice(2), 10)
+    const list: string[] = []
+    const push = (y: number, m: number) => list.push(`${String(y).padStart(2, "0")}${String(m).padStart(2, "0")}`)
+    let endY = curY, endM = curM
+    if (futureRange === "fy") {
+      // FY Eqxia : juillet → juin. fyStartYear est le millésime de juillet (ex: 2025 → FY 2025-2026)
+      const fyEndY = (fyStartYear + 1) % 100
+      endY = fyEndY
+      endM = 6
+      // Si on est déjà après juin de la FY (ne devrait pas arriver), on force currentDossier
+      if (endY < curY || (endY === curY && endM < curM)) { endY = curY; endM = curM }
+    } else {
+      const n = futureRange === "1m" ? 1 : futureRange === "3m" ? 3 : futureRange === "6m" ? 6 : 12
+      endM = curM + n
+      while (endM > 12) { endM -= 12; endY += 1 }
+    }
+    let y = curY, m = curM
+    while (y < endY || (y === endY && m <= endM)) {
+      push(y, m)
+      m++
+      if (m > 12) { m = 1; y++ }
+    }
+    return list
+  }, [currentDossier, futureRange, fyStartYear])
+
+  // Build heroData (subset futur) à partir des projets / dépenses
+  const heroData = useMemo(() => {
+    const rMNet: Record<string, number> = {}
+    const rMCa: Record<string, number> = {}
+    projects.forEach((p: Project) => {
+      const iso = getRevenueDateISO(p)
+      if (!iso) return
+      const d = new Date(iso)
+      const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+      rMNet[k] = (rMNet[k] || 0) + getRevenueMUR(p)
+      rMCa[k] = (rMCa[k] || 0) + getCAMUR(p)
+    })
+    return codes.map(m => {
+      const isCurrent = m === currentDossier
+      const isFuture = m > currentDossier
+      const ca = rMCa[m] || 0
+      const revNet = rMNet[m] || 0
+      const commission = Math.max(0, ca - revNet)
+      const dep = isFuture ? recurringCriticalMensuel : 0
+      const sal = typeof salaireForMonth === "function" ? salaireForMonth(m) : 0
+      const ebitda = revNet - dep - sal
+      return {
+        mois: m,
+        label: fmtDossier(m),
+        isFuture,
+        isCurrent,
+        ca, revenus: revNet, commission, depenses: dep, salaires: sal, ebitda,
+        caProjected: ca,
+        revenuProjected: revNet,
+        commissionProjected: commission,
+        depensesProjected: dep,
+        salairesProjected: sal,
+        ebitdaProjected: ebitda,
+      } as any
+    })
+  }, [codes, currentDossier, projects, recurringCriticalMensuel, salaireForMonth])
+
+  // Bornes de la plage pour filtrer les projets et la table
+  const rangeStartCode = codes[0] || currentDossier
+  const rangeEndCode = codes[codes.length - 1] || currentDossier
+
   const futureProjects = projects.filter((p: Project) => {
     const iso = p.endDate || p.startDate
     if (!iso) return false
     const d = new Date(iso)
     const code = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
-    return code > currentDossier && getRevenueRaw(p) > 0
+    return code > currentDossier && code <= rangeEndCode && getRevenueRaw(p) > 0
   }).sort((a: Project, b: Project) => (a.endDate || a.startDate).localeCompare(b.endDate || b.startDate))
   const recurringList = depenses.filter((d: Depense) => d.recurringCritical)
   const salaryLines = employees.filter((e: Employee) => e.cje > 0)
 
-  const totalCA = projectedTotals.ca
-  const totalRev = projectedTotals.rev
-  const totalDep = projectedTotals.dep
-  const totalSal = projectedTotals.sal
-  const totalEbitda = projectedTotals.ebitda
+  // Abonnements : dépenses recurringCritical avec champ Abonnement, dédupliquées (dernière entrée par abonnement),
+  // coût mensuel effectif respectant la périodicité (Annuel ÷ 12, Mensuel/vide ×1).
+  const abonnements = useMemo(() => {
+    interface AbItem { abonnement: string; depense: Depense; monthlyMUR: number }
+    const map: Record<string, AbItem> = {}
+    depenses.filter((d: Depense) => d.recurringCritical && !!d.abonnement && !!d.abonnement.trim()).forEach((d: Depense) => {
+      const key = (d.abonnement || "").trim()
+      const factor = d.recurrence === "Annuel" ? (1 / 12) : 1
+      const monthlyMUR = (d.montantMUR || 0) * factor
+      const cur = map[key]
+      if (!cur || (d.date || "") > (cur.depense.date || "")) {
+        map[key] = { abonnement: key, depense: d, monthlyMUR }
+      }
+    })
+    return Object.values(map).sort((a, b) => b.monthlyMUR - a.monthlyMUR)
+  }, [depenses])
+  const abonnementsTotal = abonnements.reduce((s, a) => s + a.monthlyMUR, 0)
+
+  const totalCA = heroData.reduce((s, d) => s + (d.ca || 0), 0)
+  const totalRev = heroData.reduce((s, d) => s + (d.revenus || 0), 0)
+  const totalDep = heroData.reduce((s, d) => s + (d.depenses || 0), 0)
+  const totalSal = heroData.reduce((s, d) => s + (d.salaires || 0), 0)
+  const totalEbitda = totalRev - totalDep - totalSal
+
+  const rangeLabels: Record<FutureRange, string> = { "1m": "1 mois", "3m": "3 mois", "6m": "6 mois", "12m": "12 mois", "fy": "Année fiscale" }
 
   return (
     <div>
-      {/* Header explicatif */}
-      <div style={{ ...card, marginBottom: 16, padding: "16px 20px" }}>
-        <div style={{ fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-primary)" }}>🔮 Prévisionnel</div>
-        <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 4 }}>
-          Projections basées sur les projets futurs (pondérés Win %), salaires constants et dépenses récurrentes critiques.
+      {/* Header explicatif + sélecteur de plage */}
+      <div style={{ ...card, marginBottom: 16, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-primary)" }}>🔮 Prévisionnel · {rangeLabels[futureRange]}</div>
+          <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 4 }}>
+            Projections basées sur les projets futurs (pondérés Win %), salaires constants et dépenses récurrentes critiques.
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 4, background: "var(--bg-input)", padding: 3, borderRadius: 6, border: "1px solid var(--border-subtle)" }}>
+          {(["1m", "3m", "6m", "12m", "fy"] as FutureRange[]).map(r => (
+            <button
+              key={r}
+              onClick={() => setFutureRange(r)}
+              style={{
+                padding: "4px 10px",
+                fontSize: "var(--fs-xs)",
+                fontWeight: futureRange === r ? 600 : 500,
+                background: futureRange === r ? "var(--accent)" : "transparent",
+                color: futureRange === r ? "var(--bg-page)" : "var(--text-secondary)",
+                border: "none",
+                borderRadius: 4,
+                cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              {r === "fy" ? "Y fiscal" : r}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -3791,10 +3921,9 @@ function PrevisionnelView({ heroData, projects, employees, depenses, recurringCr
                 <linearGradient id="gDepPv" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#ef4444" stopOpacity={0.35} /><stop offset="95%" stopColor="#ef4444" stopOpacity={0.02} /></linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.08)" />
-                          <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
               <ReferenceLine y={0} stroke="rgba(255,255,255,0.35)" strokeWidth={1} ifOverflow="extendDomain" {...({ isFront: false } as any)} />
-              <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />
+              <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />
               <Tooltip content={<HeroTooltip />} />
               <Area type="monotone" dataKey="salairesProjected" stackId="c" stroke="#f97316" strokeWidth={2} fill="url(#gSalPv)" connectNulls />
               <Area type="monotone" dataKey="depensesProjected" stackId="c" stroke="#ef4444" strokeWidth={2} fill="url(#gDepPv)" connectNulls />
@@ -3876,6 +4005,54 @@ function PrevisionnelView({ heroData, projects, employees, depenses, recurringCr
         )}
       </div>
 
+      {/* Abonnements (dédupliqués, coût mensuel effectif) */}
+      <div style={{ ...card, marginBottom: 16, padding: 0, overflow: "hidden" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(166,201,206,0.08)", fontSize: "var(--fs-md)", fontWeight: 600, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            Abonnements <span style={{ color: "var(--text-muted)", fontWeight: 400, fontSize: "var(--fs-xs)", marginLeft: 6 }}>{abonnements.length} abonnement(s) · total/mois : {Math.round(abonnementsTotal).toLocaleString("fr-FR")} MUR</span>
+          </div>
+          <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontStyle: "italic" }}>Cliquer pour modifier · dernière entrée par abonnement</div>
+        </div>
+        {abonnements.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontStyle: "italic" }}>Aucun abonnement renseigné (champ « Abonnement » vide sur les dépenses récurrentes critiques)</div>
+        ) : (
+          <div style={{ maxHeight: 320, overflowY: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
+              <thead style={{ position: "sticky", top: 0, background: "var(--bg-panel)", zIndex: 2 }}>
+                <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
+                  {["Abonnement", "Fournisseur", "Récurrence", "Dernière date", "Montant brut", "Mensuel effectif (MUR)"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {abonnements.map(a => {
+                  const d = a.depense
+                  return (
+                    <tr key={a.abonnement} onClick={() => onEditDepense(d)} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", cursor: "pointer", transition: "background 0.15s" }} onMouseEnter={e => (e.currentTarget.style.background = "rgba(166,201,206,0.06)")} onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+                      <td style={{ ...tdStyle, fontWeight: 600, color: "var(--accent)" }}>{a.abonnement}</td>
+                      <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{d.fournisseur || "—"}</td>
+                      <td style={tdStyle}>
+                        <span style={{ padding: "2px 8px", borderRadius: 4, background: d.recurrence === "Annuel" ? "rgba(166, 201, 206, 0.15)" : "rgba(34, 197, 94, 0.15)", color: d.recurrence === "Annuel" ? "var(--accent)" : "#22c55e", fontSize: "var(--fs-2xs)", fontWeight: 600 }}>
+                          {d.recurrence || "Mensuel"}
+                        </span>
+                      </td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", color: "var(--text-muted)" }}>{d.date || "—"}</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace" }}>{Math.round(d.montant || d.montantMUR).toLocaleString("fr-FR")} {d.devise || "MUR"}</td>
+                      <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "#ef4444" }}>{Math.round(a.monthlyMUR).toLocaleString("fr-FR")}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{ borderTop: "1px solid rgba(166,201,206,0.20)", background: "rgba(166,201,206,0.04)" }}>
+                  <td colSpan={5} style={{ ...tdStyle, fontWeight: 600, color: "var(--text-secondary)", textAlign: "right" }}>Total mensuel</td>
+                  <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 800, color: "#ef4444", fontSize: "var(--fs-sm)" }}>{Math.round(abonnementsTotal).toLocaleString("fr-FR")} MUR</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Dépenses récurrentes critiques */}
       <div style={{ ...card, marginBottom: 16, padding: 0, overflow: "hidden" }}>
         <div style={{ padding: "14px 20px", borderBottom: "1px solid rgba(166,201,206,0.08)", fontSize: "var(--fs-md)", fontWeight: 600 }}>
@@ -3943,8 +4120,8 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.06)" />
             <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
             <ReferenceLine y={0} stroke="rgba(255,255,255,0.35)" strokeWidth={1} ifOverflow="extendDomain" {...({ isFront: false } as any)} />
-            <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
-            <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />
+            <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} />
+            <YAxis tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />
             <Tooltip content={<HeroTooltip />} />
             {/* Actuels (solides) */}
             {showSeries("ca") && <Bar dataKey="caPast" fill="#3D8899" />}
@@ -3973,8 +4150,8 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
         <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.06)" />
             <ReferenceLine y={0} stroke="var(--text-secondary)" strokeWidth={1.5} ifOverflow="extendDomain" />
         <ReferenceLine y={0} stroke="rgba(255,255,255,0.35)" strokeWidth={1} ifOverflow="extendDomain" {...({ isFront: false } as any)} />
-        <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} />
-        <YAxis tick={{ fill: "var(--text-muted)", fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />
+        <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} />
+        <YAxis tick={{ fill: "var(--text-muted)", fontSize: 12 }} axisLine={false} tickLine={false} tickFormatter={(v: any) => `${(Number(v) / 1000).toFixed(0)}k`} />
         <Tooltip content={<HeroTooltip />} />
         {/* ── PASSÉ (pleines) ── */}
         {showSeries("salaires") && <Area type="monotone" dataKey="salairesPast" stackId="chargesPast" stroke="#f97316" strokeWidth={2} fill="url(#gSal)" dot={false} activeDot={{ r: 4, fill: "#f97316", strokeWidth: 0 }} connectNulls={false} />}
