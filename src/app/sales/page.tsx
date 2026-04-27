@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { Monitor, Moon, Sun } from 'lucide-react'
+import { Monitor, Moon, Sun, Settings, AlertTriangle, AlertOctagon, Info, CheckCircle2, ExternalLink, Database } from 'lucide-react'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { useTheme } from '@/hooks/useTheme'
 import { useProjectsData } from '@/hooks/useProjectsData'
@@ -24,7 +24,7 @@ import { ClientDetail } from '@/components/sales/ClientDetail'
 import type { Project, Client } from '@/types/sales'
 import { CLOSED_WON, CLOSED_LOST, fmtCurrency, winFactor } from '@/types/sales'
 
-type Tab = 'pipeline' | 'forecast' | 'clients'
+type Tab = 'pipeline' | 'forecast' | 'clients' | 'settings'
 
 const BG_IMAGES = [
   '/assets/backgrounds/bg-ice-surface-light.jpg',
@@ -167,7 +167,7 @@ export default function SalesPage() {
 
       {/* Tab bar */}
       <div style={{ padding: '0 24px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: 0, alignItems: 'center' }}>
-        {(['pipeline', 'forecast', 'clients'] as Tab[]).map(t => (
+        {(['pipeline', 'forecast', 'clients', 'settings'] as Tab[]).map(t => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -177,9 +177,11 @@ export default function SalesPage() {
               color: tab === t ? 'var(--accent)' : 'var(--text-secondary)',
               borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
               transition: 'color 0.15s', fontFamily: 'inherit',
+              display: 'flex', alignItems: 'center', gap: 5,
             }}
           >
-            {{ pipeline: 'Pipeline', forecast: 'Prévisionnel', clients: 'Clients' }[t]}
+            {t === 'settings' && <Settings size={13} />}
+            {{ pipeline: 'Pipeline', forecast: 'Prévisionnel', clients: 'Clients', settings: 'Réglages' }[t]}
           </button>
         ))}
 
@@ -355,6 +357,11 @@ export default function SalesPage() {
             </div>
           </div>
         )}
+
+        {/* ── Tab Réglages ──────────────────────────────────────────────── */}
+        {tab === 'settings' && (
+          <SalesSettings projects={localProjects} clients={clients} />
+        )}
       </div>
 
       {/* Client detail panel */}
@@ -391,6 +398,205 @@ export default function SalesPage() {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── SalesSettings ─────────────────────────────────────────────────────────
+
+type IssueLevel = 'critical' | 'warning' | 'info'
+interface SalesIssue { level: IssueLevel; source: 'projects' | 'clients'; entity: string; field: string; message: string }
+
+const NOTION_BASES: { label: string; env: string; id?: string; color: string }[] = [
+  { label: 'Projects', env: 'NOTION_PROJECTS_DB_ID', id: 'c0167047-f3c2-45c3-99bd-6c170d207a96', color: '#3b82f6' },
+  { label: 'Clients', env: 'NOTION_CLIENTS_DB_ID', id: '942e7bc6-f656-43c8-9af2-71a1365a060e', color: '#10b981' },
+  { label: 'Contacts', env: 'NOTION_CONTACTS_DB_ID', color: '#8b5cf6' },
+  { label: 'Tasks', env: 'NOTION_TASKS_DB_ID', color: '#f59e0b' },
+]
+
+function notionUrl(id: string) { return `https://notion.so/${id.replace(/-/g, '')}` }
+
+function IssueIcon({ level }: { level: IssueLevel }) {
+  if (level === 'critical') return <AlertOctagon size={13} color="#ef4444" style={{ flexShrink: 0 }} />
+  if (level === 'warning') return <AlertTriangle size={13} color="#facc15" style={{ flexShrink: 0 }} />
+  return <Info size={13} color="#60a5fa" style={{ flexShrink: 0 }} />
+}
+
+function SalesSettings({ projects, clients }: { projects: Project[]; clients: Client[] }) {
+  const [levelFilter, setLevelFilter] = useState<'all' | 'critical' | 'warning'>('critical')
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'projects' | 'clients'>('all')
+
+  const issues = useMemo<SalesIssue[]>(() => {
+    const out: SalesIssue[] = []
+    const skip = new Set(['Lost', 'Cancelled'])
+
+    projects.filter(p => !skip.has(p.status)).forEach(p => {
+      const name = p.name || p.id
+      if (!p.type) out.push({ level: 'critical', source: 'projects', entity: name, field: 'Type', message: 'Type de projet non renseigné' })
+      if (!p.quotedAmount || p.quotedAmount === 0) out.push({ level: 'critical', source: 'projects', entity: name, field: 'Quoted Amount', message: 'Montant devisé absent — deal non valorisé dans le forecast' })
+      if (!p.expectedCloseDate && !p.endDate) out.push({ level: 'warning', source: 'projects', entity: name, field: 'Expected Close Date', message: 'Pas de date de clôture — classé en fallback +3 mois dans le forecast' })
+      if ((!p.winPercent || p.winPercent === 0) && (!p.winAuto || p.winAuto === 0)) out.push({ level: 'critical', source: 'projects', entity: name, field: 'Win %', message: 'Aucun win % (ni gut feeling ni auto) — forecast pondéré = 0' })
+      if (!p.ownerName) out.push({ level: 'warning', source: 'projects', entity: name, field: 'Owner', message: 'Responsable non renseigné' })
+      if (!p.clientName || p.clientName === 'N/A') out.push({ level: 'warning', source: 'projects', entity: name, field: 'Client', message: 'Aucun client lié au deal' })
+    })
+
+    clients.forEach(c => {
+      const name = c.name || c.id
+      if (!c.satisfaction) out.push({ level: 'warning', source: 'clients', entity: name, field: 'Satisfaction', message: 'Score de satisfaction absent' })
+      if (!c.relationshipOwner) out.push({ level: 'warning', source: 'clients', entity: name, field: 'Relationship Owner', message: 'Responsable relation absent' })
+      if (!c.health) out.push({ level: 'info', source: 'clients', entity: name, field: 'Health', message: 'Indicateur santé non calculé' })
+    })
+
+    return out.sort((a, b) => ({ critical: 0, warning: 1, info: 2 }[a.level] - ({ critical: 0, warning: 1, info: 2 }[b.level])))
+  }, [projects, clients])
+
+  const filtered = issues.filter(i => {
+    if (levelFilter !== 'all' && i.level !== levelFilter) return false
+    if (sourceFilter !== 'all' && i.source !== sourceFilter) return false
+    return true
+  })
+
+  const counts = {
+    critical: issues.filter(i => i.level === 'critical').length,
+    warning: issues.filter(i => i.level === 'warning').length,
+  }
+
+  const cardStyle: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', overflow: 'hidden' }
+  const segBtnStyle = (active: boolean): React.CSSProperties => ({
+    padding: '4px 12px', fontSize: 'var(--fs-xs)', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+    border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
+    background: active ? 'var(--accent-soft)' : 'transparent',
+    color: active ? 'var(--accent)' : 'var(--text-muted)',
+  })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* Bases Notion */}
+      <div style={cardStyle}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Database size={15} color="var(--accent)" />
+          <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }}>Bases Notion</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 0 }}>
+          {NOTION_BASES.map((db, i) => (
+            <div key={db.label} style={{ padding: '16px 20px', borderRight: i < NOTION_BASES.length - 1 ? '1px solid var(--border-subtle)' : undefined }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: db.color, flexShrink: 0 }} />
+                <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-secondary)' }}>{db.label}</span>
+              </div>
+              <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', fontFamily: 'monospace', marginBottom: 6, wordBreak: 'break-all' }}>
+                {db.id ? db.id.slice(0, 8) + '…' : <span style={{ fontStyle: 'italic' }}>via env</span>}
+              </div>
+              <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', marginBottom: 8 }}>
+                <code style={{ background: 'var(--bg-input)', padding: '1px 5px', borderRadius: 3, fontSize: 10 }}>{db.env}</code>
+              </div>
+              {db.id && (
+                <a href={notionUrl(db.id)} target="_blank" rel="noopener noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 'var(--fs-2xs)', color: 'var(--accent)', textDecoration: 'none' }}>
+                  Ouvrir <ExternalLink size={10} />
+                </a>
+              )}
+              {!db.id && (
+                <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', fontStyle: 'italic' }}>ID via variable Vercel</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* DB Review */}
+      <div style={cardStyle}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 2 }}>🩺 DB Review</div>
+              <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+                Qualité des données Notion · {projects.filter(p => !['Lost','Cancelled'].includes(p.status)).length} projets actifs · {clients.length} clients
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 20, flexShrink: 0 }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#ef4444', fontFamily: 'monospace' }}>{counts.critical}</div>
+                <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3 }}><AlertOctagon size={10} color="#ef4444" /> Critical</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#facc15', fontFamily: 'monospace' }}>{counts.warning}</div>
+                <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={10} color="#facc15" /> Warning</div>
+              </div>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: '#4ade80', fontFamily: 'monospace' }}>{Math.max(0, (projects.filter(p => !['Lost','Cancelled'].includes(p.status)).length + clients.length) - counts.critical - counts.warning)}</div>
+                <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3 }}><CheckCircle2 size={10} color="#4ade80" /> OK</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {(['critical', 'warning', 'all'] as const).map(l => (
+              <button key={l} onClick={() => setLevelFilter(l)} style={segBtnStyle(levelFilter === l)}>
+                {{ critical: 'Critical', warning: 'Warning', all: 'Tous' }[l]}
+              </button>
+            ))}
+          </div>
+          <div style={{ width: 1, height: 18, background: 'var(--border-subtle)', margin: '0 4px' }} />
+          <div style={{ display: 'flex', gap: 4 }}>
+            {(['all', 'projects', 'clients'] as const).map(s => (
+              <button key={s} onClick={() => setSourceFilter(s)} style={segBtnStyle(sourceFilter === s)}>
+                {{ all: 'Tout', projects: 'Projects', clients: 'Clients' }[s]}
+              </button>
+            ))}
+          </div>
+          <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>{filtered.length} issue{filtered.length !== 1 ? 's' : ''}</span>
+        </div>
+
+        {/* Issues table */}
+        {filtered.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--fs-sm)', fontStyle: 'italic' }}>
+            🎉 Aucun problème dans cette catégorie
+          </div>
+        ) : (
+          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--fs-xs)' }}>
+              <thead>
+                <tr style={{ background: 'var(--bg-input)' }}>
+                  <th style={{ padding: '8px 20px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 500, fontSize: 'var(--fs-2xs)', textTransform: 'uppercase', letterSpacing: '0.06em', width: 80 }}>Niveau</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 500, fontSize: 'var(--fs-2xs)', textTransform: 'uppercase', letterSpacing: '0.06em', width: 80 }}>Source</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 500, fontSize: 'var(--fs-2xs)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Entité</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 500, fontSize: 'var(--fs-2xs)', textTransform: 'uppercase', letterSpacing: '0.06em', width: 120 }}>Champ</th>
+                  <th style={{ padding: '8px 20px 8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 500, fontSize: 'var(--fs-2xs)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Message</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((issue, idx) => (
+                  <tr key={idx} style={{ borderTop: '1px solid var(--border-subtle)', background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
+                    <td style={{ padding: '8px 20px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                        <IssueIcon level={issue.level} />
+                        <span style={{ fontSize: 'var(--fs-2xs)', color: issue.level === 'critical' ? '#ef4444' : issue.level === 'warning' ? '#facc15' : '#60a5fa', fontWeight: 600, textTransform: 'capitalize' }}>
+                          {issue.level}
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', textTransform: 'capitalize' }}>{issue.source}</span>
+                    </td>
+                    <td style={{ padding: '8px 12px', color: 'var(--text-primary)', maxWidth: 200 }}>
+                      <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{issue.entity}</span>
+                    </td>
+                    <td style={{ padding: '8px 12px' }}>
+                      <code style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-secondary)', background: 'var(--bg-input)', padding: '1px 5px', borderRadius: 3 }}>{issue.field}</code>
+                    </td>
+                    <td style={{ padding: '8px 20px 8px 12px', color: 'var(--text-muted)' }}>{issue.message}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
     </div>
   )
 }

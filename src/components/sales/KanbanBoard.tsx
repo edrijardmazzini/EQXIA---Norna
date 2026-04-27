@@ -210,8 +210,10 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
                   </span>
                 </div>
                 {total > 0 && (
-                  <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)' }}>
-                    {fmtCurrency(total)} · {Math.round(colDeals.reduce((s, d) => s + d.quotedAmount * winFactor(d), 0))}
+                  <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <span><span style={{ opacity: 0.6 }}>CA </span>{fmtCurrency(total)}</span>
+                    <span style={{ opacity: 0.4 }}>·</span>
+                    <span><span style={{ opacity: 0.6 }}>Forecast </span>{fmtCurrency(colDeals.reduce((s, d) => s + d.quotedAmount * winFactor(d), 0))}</span>
                   </div>
                 )}
               </div>
