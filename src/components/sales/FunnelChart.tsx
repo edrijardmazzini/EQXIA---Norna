@@ -3,9 +3,12 @@
 import { useState, useMemo } from 'react'
 import {
   ResponsiveContainer,
-  FunnelChart as RFunnelChart,
-  Funnel,
-  LabelList,
+  BarChart,
+  Bar,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
   Tooltip,
 } from 'recharts'
 import type { Project } from '@/types/sales'
@@ -21,7 +24,7 @@ function gutFactor(p: Project): number {
   return Math.min(1, Math.max(0, v))
 }
 
-// Non-cumulative snapshot: deals AT each stage, width = CA × gut%
+// Non-cumulative snapshot: deals AT each stage, bar width = count, label = CA × gut%
 function buildFunnelData(projects: Project[]) {
   const stages = PIPELINE_COLS.map(col => {
     const deals = projects.filter(p => p.status === col.status)
@@ -76,7 +79,7 @@ function Btn({ active, onClick, children }: { active: boolean; onClick: () => vo
   )
 }
 
-// ── Bars view ──────────────────────────────────────────────────────────────
+// ── Bars view (cumulative, CSS) ─────────────────────────────────────────────
 
 function StepBar({ step, maxCount, convRate, isLast }: {
   step: { label: string; count: number; color: string }
@@ -104,6 +107,43 @@ function StepBar({ step, maxCount, convRate, isLast }: {
         </div>
       )}
     </div>
+  )
+}
+
+// ── Custom tooltip pour le funnel Recharts ─────────────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function FunnelTooltip({ active, payload }: any) {
+  if (!active || !payload?.length) return null
+  const d = payload[0].payload as ReturnType<typeof buildFunnelData>[0]
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: '8px 12px', fontSize: 'var(--fs-xs)' }}>
+      <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--text-primary)' }}>{d.name}</div>
+      <div style={{ color: 'var(--text-secondary)' }}>{d.count} deal{d.count !== 1 ? 's' : ''}</div>
+      {d.value > 0 && <div style={{ color: 'var(--accent)', fontWeight: 600, marginTop: 2 }}>CA×gut {fmtCurrency(d.value)}</div>}
+    </div>
+  )
+}
+
+// ── Custom label affiché à droite de chaque barre ──────────────────────────
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function BarLabel({ x, y, width, height, value, index, funnelData }: any) {
+  const item = funnelData[index]
+  if (!item || item.count === 0) return null
+  const lx = (x ?? 0) + (width ?? 0) + 8
+  const my = (y ?? 0) + (height ?? 0) / 2
+  return (
+    <g>
+      <text x={lx} y={my - 4} fill="var(--text-secondary)" fontSize={11} fontWeight={600} dominantBaseline="auto">
+        {value} deal{value !== 1 ? 's' : ''}
+      </text>
+      {item.value > 0 && (
+        <text x={lx} y={my + 9} fill="var(--accent)" fontSize={10} dominantBaseline="auto">
+          {fmtCurrency(item.value)}
+        </text>
+      )}
+    </g>
   )
 }
 
@@ -141,44 +181,37 @@ export function FunnelChart({ projects }: FunnelChartProps) {
 
       {mode === 'funnel' ? (
         <ResponsiveContainer width="100%" height={320}>
-          <RFunnelChart margin={{ top: 8, right: 175, left: 8, bottom: 8 }}>
-            <Tooltip
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              content={({ active, payload }: any) => {
-                if (!active || !payload?.length) return null
-                const d = payload[0].payload as (typeof funnelData)[0]
-                return (
-                  <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: '8px 12px', fontSize: 'var(--fs-xs)' }}>
-                    <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--text-primary)' }}>{d.name}</div>
-                    <div style={{ color: 'var(--text-secondary)' }}>{d.count} deal{d.count !== 1 ? 's' : ''}</div>
-                    {d.value > 0 && <div style={{ color: 'var(--accent)', fontWeight: 600, marginTop: 2 }}>CA×gut {fmtCurrency(d.value)}</div>}
-                  </div>
-                )
-              }}
+          <BarChart
+            data={funnelData}
+            layout="vertical"
+            margin={{ top: 4, right: 160, left: 8, bottom: 4 }}
+          >
+            <CartesianGrid horizontal={false} stroke="rgba(166,201,206,0.08)" />
+            <YAxis
+              dataKey="name"
+              type="category"
+              tickLine={false}
+              axisLine={false}
+              tick={{ fill: 'var(--text-secondary)', fontSize: 12, fontWeight: 500 }}
+              width={120}
             />
-            <Funnel data={funnelData} dataKey="value" isAnimationActive lastShapeType="rectangle">
-              <LabelList
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                content={(props: any) => {
-                  const item = funnelData[props.index as number]
-                  if (!item) return null
-                  const lx = (props.x ?? 0) + (props.width ?? 0) + 8
-                  const my = (props.y ?? 0) + (props.height ?? 0) / 2
-                  return (
-                    <g key={String(props.index)}>
-                      <text x={lx} y={my - 5} fill="var(--text-secondary)" fontSize={11} fontWeight={600}>
-                        {item.name}
-                        <tspan fill="var(--text-muted)" fontWeight={400}> ({item.count})</tspan>
-                      </text>
-                      <text x={lx} y={my + 9} fill="var(--accent)" fontSize={10}>
-                        {item.value > 0 ? fmtCurrency(item.value) : '—'}
-                      </text>
-                    </g>
-                  )
-                }}
-              />
-            </Funnel>
-          </RFunnelChart>
+            <XAxis
+              type="number"
+              tickLine={false}
+              axisLine={false}
+              tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
+              allowDecimals={false}
+            />
+            <Tooltip content={<FunnelTooltip />} cursor={{ fill: 'rgba(166,201,206,0.06)' }} />
+            <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={26}
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              label={(props: any) => <BarLabel {...props} funnelData={funnelData} />}
+            >
+              {funnelData.map((entry, i) => (
+                <Cell key={i} fill={entry.fill} />
+              ))}
+            </Bar>
+          </BarChart>
         </ResponsiveContainer>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
