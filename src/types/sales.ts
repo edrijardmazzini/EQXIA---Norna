@@ -74,6 +74,32 @@ export interface Employee {
   name: string
 }
 
+export interface Contact {
+  id: string
+  name: string
+  email: string
+  phone: string
+  linkedin: string
+  role: string
+  notes: string
+  clientIds: string[]
+}
+
+export type TaskStatus = 'To Do' | 'In Progress' | 'Done' | 'Cancelled' | string
+
+export interface Task {
+  id: string
+  name: string
+  status: TaskStatus
+  dueDate: string
+  assignedTo: string
+  priority: string
+  notes: string
+  clientIds: string[]
+  projectIds: string[]
+  created: string
+}
+
 export interface SalesData {
   projects: Project[]
   clients: Client[]
