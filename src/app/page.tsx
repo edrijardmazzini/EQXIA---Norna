@@ -134,6 +134,14 @@ function loadSettingsFromStorage(): RuntimeSettings {
 // Toggle UI win rate pour vues prévisionnelles (gut feeling par défaut)
 let __WIN_UI__: 'gut' | 'auto' = 'gut'
 
+// Taux par étape pipeline utilisés en mode "auto" quand winAuto n'est pas renseigné dans Notion
+const STAGE_WIN_RATES: Record<string, number> = {
+  Lead: 0.10, Qualified: 0.25, Scoping: 0.40,
+  'Proposal Sent': 0.60, Negotiation: 0.70,
+  'Verbal Commitment': 0.85, 'Won orally': 0.90,
+  Won: 1.0, Active: 1.0, Completed: 1.0,
+}
+
 // ─── Taux historiques (chargés au mount, par /api/rates/history) ──────────────
 // Format : { "EUR": [{ date: "2026-04-15", rate: 49.2 }, ...], ... }
 // Trié ascendant par date côté API. Lookup binaire par scan linéaire.
@@ -167,8 +175,10 @@ function normalizeWin(value: number | undefined | null): number {
 function getWinRate(p: Project): number {
   const gut = normalizeWin(p.winPercent)
   const auto = normalizeWin(p.winAuto)
-  // Le toggle UI prend le dessus sur __SETTINGS__.winPref pour les vues prévisionnelles
-  if (__WIN_UI__ === 'auto') return auto > 0 ? auto : gut
+  if (__WIN_UI__ === 'auto') {
+    // Formule Notion en priorité, sinon taux par étape pipeline
+    return auto > 0 ? auto : (STAGE_WIN_RATES[p.status] ?? 0)
+  }
   return gut
 }
 function getCommissionRate(p: Project): number {
@@ -1076,11 +1086,10 @@ export default function DashboardPage() {
     const rMNet: Record<string, number> = {}
     const rMCa: Record<string, number> = {}
     // Inclut TOUS les projets (pas seulement Won) pour que le futur / pipeline apparaisse
+    // Utilise getProjectDossier (= computeProjectRevenue) pour cohérence avec revParMois et KPI
     projects.forEach(p => {
-      const iso = getRevenueDateISO(p)
-      if (!iso) return
-      const d = new Date(iso)
-      const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+      const k = getProjectDossier(p)
+      if (!k) return
       rMNet[k] = (rMNet[k] || 0) + getRevenueMUR(p)
       rMCa[k] = (rMCa[k] || 0) + getCAMUR(p)
     })
@@ -3798,10 +3807,8 @@ function PrevisionnelView({ projects, employees, depenses, recurringCriticalMens
     const rMNet: Record<string, number> = {}
     const rMCa: Record<string, number> = {}
     projects.forEach((p: Project) => {
-      const iso = getRevenueDateISO(p)
-      if (!iso) return
-      const d = new Date(iso)
-      const k = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
+      const k = getProjectDossier(p)
+      if (!k) return
       rMNet[k] = (rMNet[k] || 0) + getRevenueMUR(p)
       rMCa[k] = (rMCa[k] || 0) + getCAMUR(p)
     })
