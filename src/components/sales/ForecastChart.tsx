@@ -47,12 +47,21 @@ function buildData(projects: Project[], mode: WeightMode): { months: MonthDatum[
     })
   }
 
+  const fallbackD = new Date(now.getFullYear(), now.getMonth() + 3, 1)
+  const fallbackYM = `${fallbackD.getFullYear()}-${String(fallbackD.getMonth() + 1).padStart(2, '0')}`
+
+  function resolveYM(p: Project): string {
+    const raw = p.expectedCloseDate || p.endDate
+    if (raw) {
+      const [cy, cm] = raw.split('-')
+      if (cy && cm) return `${cy}-${cm.padStart(2, '0')}`
+    }
+    return fallbackYM
+  }
+
   for (const p of projects) {
-    const closeDate = p.expectedCloseDate || p.decisionDate
-    if (!closeDate || !p.type) continue
-    const [cy, cm] = closeDate.split('-')
-    if (!cy || !cm) continue
-    const ym = `${cy}-${cm.padStart(2, '0')}`
+    if (!p.type) continue
+    const ym = resolveYM(p)
     if (ymLabels.some(m => m.ym === ym)) typesSet.add(p.type)
   }
 
@@ -63,10 +72,8 @@ function buildData(projects: Project[], mode: WeightMode): { months: MonthDatum[
     for (const t of types) datum[t] = 0
 
     for (const p of projects) {
-      const closeDate = p.expectedCloseDate || p.decisionDate
-      if (!closeDate || !p.type || !typesSet.has(p.type)) continue
-      const [cy, cm] = closeDate.split('-')
-      if (!cy || !cm || `${cy}-${cm.padStart(2, '0')}` !== ym) continue
+      if (!p.type || !typesSet.has(p.type)) continue
+      if (resolveYM(p) !== ym) continue
 
       const weight = CLOSED_WON.has(p.status) ? 1 : getWeight(p, mode)
       const amount = (p.quotedAmount || p.finalAmount) * weight

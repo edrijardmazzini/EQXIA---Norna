@@ -1,11 +1,13 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
+import { Monitor, Moon, Sun } from 'lucide-react'
 import { AppHeader } from '@/components/layout/AppHeader'
-import { Spinner } from '@/components/ui/Spinner'
+import { useTheme } from '@/hooks/useTheme'
 import { useProjectsData } from '@/hooks/useProjectsData'
+import { EqxiaLoadingScreen } from '@/components/eqxia'
 import { KPICard } from '@/components/sales/KPICard'
 import { KanbanBoard } from '@/components/sales/KanbanBoard'
 import { ForecastChart } from '@/components/sales/ForecastChart'
@@ -21,18 +23,25 @@ import { ClientCard } from '@/components/sales/ClientCard'
 import { ClientDetail } from '@/components/sales/ClientDetail'
 import type { Project, Client } from '@/types/sales'
 import { CLOSED_WON, CLOSED_LOST, fmtCurrency, winFactor } from '@/types/sales'
-import { useEffect } from 'react'
 
 type Tab = 'pipeline' | 'forecast' | 'clients'
 
-const SATISFACTION_SCORES: Record<string, number> = {
-  'Very Satisfied': 4, Satisfied: 3, Neutral: 2, Dissatisfied: 1,
-}
+const BG_IMAGES = [
+  '/assets/backgrounds/bg-ice-surface-light.jpg',
+  '/assets/backgrounds/bg-sediment-blue-white.jpg',
+  '/assets/backgrounds/bg-ink-teal-copper.jpg',
+  '/assets/backgrounds/bg-glacial-river-teal.jpg',
+  '/assets/backgrounds/bg-confluence-streams.jpg',
+  '/assets/backgrounds/bg-glacial-teal-copper.jpg',
+]
 
 export default function SalesPage() {
   const { data: session } = useSession()
   const router = useRouter()
+  const { mode, setTheme } = useTheme()
   const { projects, clients, employees, loading, error, reload } = useProjectsData()
+  const [bgImage, setBgImage] = useState(BG_IMAGES[0])
+  const [themeOpen, setThemeOpen] = useState(false)
   const [tab, setTab] = useState<Tab>('pipeline')
   const [ownerFilter, setOwnerFilter] = useState('')
   const [localProjects, setLocalProjects] = useState<Project[]>([])
@@ -50,6 +59,8 @@ export default function SalesPage() {
       router.push('/login')
     }
   }, [session, router])
+
+  useEffect(() => { setBgImage(BG_IMAGES[Math.floor(Math.random() * BG_IMAGES.length)]) }, [])
 
   useEffect(() => {
     setLocalProjects(projects)
@@ -103,8 +114,8 @@ export default function SalesPage() {
     if (clientSort === 'ltv') list.sort((a, b) => b.lifetimeValue - a.lifetimeValue)
     if (clientSort === 'projects') {
       list.sort((a, b) => {
-        const aCount = localProjects.filter(p => p.clientIds.some(id => id === a.id) && !CLOSED_WON.has(p.status) && !CLOSED_LOST.has(p.status)).length
-        const bCount = localProjects.filter(p => p.clientIds.some(id => id === b.id) && !CLOSED_WON.has(p.status) && !CLOSED_LOST.has(p.status)).length
+        const aCount = localProjects.filter((p: Project) => p.clientIds.some((id: string) => id === a.id) && !CLOSED_WON.has(p.status) && !CLOSED_LOST.has(p.status)).length
+        const bCount = localProjects.filter((p: Project) => p.clientIds.some((id: string) => id === b.id) && !CLOSED_WON.has(p.status) && !CLOSED_LOST.has(p.status)).length
         return bCount - aCount
       })
     }
@@ -123,20 +134,16 @@ export default function SalesPage() {
 
   // ── Loading / Error ────────────────────────────────────────────────────────
 
-  if (loading) {
-    return (
-      <div style={{ minHeight: '100vh', background: 'var(--bg-page)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, color: 'var(--text-secondary)', fontSize: 'var(--fs-base)' }}>
-        <Spinner />
-        Chargement du pipeline…
-      </div>
-    )
-  }
+  if (loading) return <EqxiaLoadingScreen appName="Sales" bgImage={bgImage} />
 
   if (error) {
     return (
-      <div style={{ minHeight: '100vh', background: 'var(--bg-page)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
-        <div style={{ color: 'var(--color-error)' }}>Erreur : {error}</div>
-        <button onClick={reload} style={{ padding: '8px 16px', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-btn)', color: 'var(--text-secondary)', cursor: 'pointer' }}>Réessayer</button>
+      <div style={{ minHeight: '100vh', backgroundImage: `url(${bgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'var(--bg-overlay)' }} />
+        <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', flexDirection: 'column', gap: 12 }}>
+          <div style={{ color: 'var(--color-error)' }}>Erreur : {error}</div>
+          <button onClick={reload} style={{ padding: '8px 16px', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-btn)', color: 'var(--text-secondary)', cursor: 'pointer' }}>Réessayer</button>
+        </div>
       </div>
     )
   }
@@ -144,7 +151,9 @@ export default function SalesPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div style={{ minHeight: '100vh', background: 'var(--bg-page)', color: 'var(--text-primary)' }}>
+    <div style={{ minHeight: '100vh', backgroundImage: `url(${bgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }}>
+      <div style={{ position: 'fixed', inset: 0, background: 'var(--bg-overlay)', zIndex: 0 }} />
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh', color: 'var(--text-primary)' }}>
       <AppHeader
         appName="Sales"
         right={
@@ -356,6 +365,32 @@ export default function SalesPage() {
           onClose={() => setSelectedClient(null)}
         />
       )}
+      </div>{/* /relative zIndex:1 */}
+
+      {/* Theme toggle — identique au dashboard */}
+      <div style={{ position: 'fixed', bottom: 20, left: 20, zIndex: 100 }}>
+        <div style={{ position: 'relative' }}>
+          {themeOpen && (
+            <>
+              <div onClick={() => setThemeOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 98 }} />
+              <div style={{ position: 'absolute', bottom: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', gap: 4, zIndex: 99, background: 'var(--bg-panel)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid var(--border-panel)', borderRadius: 10, padding: 4, boxShadow: 'var(--shadow-card)' }}>
+                {(['auto', 'dark', 'light'] as const).map(m => {
+                  const Icon = ({ auto: Monitor, dark: Moon, light: Sun } as const)[m]
+                  const active = mode === m
+                  return (
+                    <button key={m} onClick={() => { setTheme(m); setThemeOpen(false) }} style={{ width: 36, height: 36, background: active ? 'var(--accent-soft)' : 'none', border: 'none', borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s', opacity: active ? 1 : 0.5, color: 'var(--text-primary)' }}>
+                      <Icon size={15} />
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )}
+          <button onClick={() => setThemeOpen(t => !t)} title="Thème" style={{ width: 36, height: 36, background: 'var(--bg-panel)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid var(--border-panel)', borderRadius: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--shadow-card)', color: 'var(--text-primary)' }}>
+            {{ auto: <Monitor size={15} />, dark: <Moon size={15} />, light: <Sun size={15} /> }[mode]}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
