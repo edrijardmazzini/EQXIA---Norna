@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { Task } from '@/types/sales'
 
 const NOTION_VERSION = '2022-06-28'
-const TASKS_DB_ID = process.env.NOTION_TASKS_DB_ID || ''
+const TASKS_DB_ID = process.env.NOTION_TASKS_DB_ID || '0360d820-7e6b-4379-9d87-9f38afa64e85'
 
 function notionHeaders() {
   return {

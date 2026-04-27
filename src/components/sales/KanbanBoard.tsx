@@ -6,6 +6,11 @@ import { PIPELINE_COLS, CLOSED_WON, CLOSED_LOST, TYPE_COLORS, fmtCurrency, winFa
 import { DealCard } from './DealCard'
 import { Button } from '@/components/ui/Button'
 
+function gutFn(p: Project): number {
+  const v = p.winPercent > 1 ? p.winPercent / 100 : (p.winPercent || 0)
+  return Math.min(1, Math.max(0, v))
+}
+
 const NEXT_ACTIONS = ['Send Proposal', 'Follow Up', 'Schedule Meeting', 'Send Contract', 'Awaiting Client', 'Internal Review', 'Close Deal']
 const DEAL_TYPES = ['Workshop', 'Audit', 'Consulting', 'Development', 'Training', 'Retainer', 'Strategic Review', 'Internal']
 const CURRENCIES = ['MUR', 'EUR', 'USD', 'GBP']
@@ -209,13 +214,17 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
                     {colDeals.length}
                   </span>
                 </div>
-                {total > 0 && (
-                  <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <span><span style={{ opacity: 0.6 }}>CA </span>{fmtCurrency(total)}</span>
-                    <span style={{ opacity: 0.4 }}>·</span>
-                    <span><span style={{ opacity: 0.6 }}>Forecast </span>{fmtCurrency(colDeals.reduce((s, d) => s + d.quotedAmount * winFactor(d), 0))}</span>
-                  </div>
-                )}
+                {total > 0 && (() => {
+                  const caGut = colDeals.reduce((s, d) => s + (d.quotedAmount || 0) * gutFn(d), 0)
+                  const revGut = colDeals.reduce((s, d) => s + (d.netAmount || 0) * gutFn(d), 0)
+                  return (
+                    <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      <span><span style={{ opacity: 0.55 }}>CA×gut </span>{fmtCurrency(caGut)}</span>
+                      <span style={{ opacity: 0.3 }}>|</span>
+                      <span><span style={{ opacity: 0.55 }}>Rev×gut </span>{fmtCurrency(revGut)}</span>
+                    </div>
+                  )
+                })()}
               </div>
 
               <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 60 }}>

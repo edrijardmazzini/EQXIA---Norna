@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { Contact } from '@/types/sales'
 
 const NOTION_VERSION = '2022-06-28'
-const CONTACTS_DB_ID = process.env.NOTION_CONTACTS_DB_ID || ''
+const CONTACTS_DB_ID = process.env.NOTION_CONTACTS_DB_ID || 'f8488151-3f9f-4a1e-87c8-8e068a5eb4a8'
 
 function notionHeaders() {
   return {

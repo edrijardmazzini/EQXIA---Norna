@@ -158,6 +158,15 @@ export default function SalesPage() {
         appName="Sales"
         right={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+              {new Date().toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+            </span>
+            <button
+              onClick={() => setTab('settings')}
+              style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', textDecoration: 'none', padding: '4px 10px', borderRadius: 'var(--radius-btn)', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'inherit' }}
+            >
+              <Settings size={13} /> Réglages
+            </button>
             <a href="/" style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', textDecoration: 'none', padding: '4px 10px', borderRadius: 'var(--radius-btn)', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)' }}>
               ← Finance
             </a>
@@ -410,8 +419,8 @@ interface SalesIssue { level: IssueLevel; source: 'projects' | 'clients'; entity
 const NOTION_BASES: { label: string; env: string; id?: string; color: string }[] = [
   { label: 'Projects', env: 'NOTION_PROJECTS_DB_ID', id: 'c0167047-f3c2-45c3-99bd-6c170d207a96', color: '#3b82f6' },
   { label: 'Clients', env: 'NOTION_CLIENTS_DB_ID', id: '942e7bc6-f656-43c8-9af2-71a1365a060e', color: '#10b981' },
-  { label: 'Contacts', env: 'NOTION_CONTACTS_DB_ID', color: '#8b5cf6' },
-  { label: 'Tasks', env: 'NOTION_TASKS_DB_ID', color: '#f59e0b' },
+  { label: 'Contacts', env: 'NOTION_CONTACTS_DB_ID', id: 'f8488151-3f9f-4a1e-87c8-8e068a5eb4a8', color: '#8b5cf6' },
+  { label: 'Tasks', env: 'NOTION_TASKS_DB_ID', id: '0360d820-7e6b-4379-9d87-9f38afa64e85', color: '#f59e0b' },
 ]
 
 function notionUrl(id: string) { return `https://notion.so/${id.replace(/-/g, '')}` }
