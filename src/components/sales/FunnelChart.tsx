@@ -1,16 +1,6 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  Cell,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-} from 'recharts'
 import type { Project } from '@/types/sales'
 import { PIPELINE_COLS, CLOSED_WON, fmtCurrency } from '@/types/sales'
 
@@ -24,7 +14,7 @@ function gutFactor(p: Project): number {
   return Math.min(1, Math.max(0, v))
 }
 
-// Non-cumulative snapshot: deals AT each stage, bar width = count, label = CA × gut%
+// Non-cumulative: deals AT each stage, value = CA × gut%
 function buildFunnelData(projects: Project[]) {
   const stages = PIPELINE_COLS.map(col => {
     const deals = projects.filter(p => p.status === col.status)
@@ -37,7 +27,7 @@ function buildFunnelData(projects: Project[]) {
   return stages
 }
 
-// Cumulative: all deals that have reached at least each stage (bars view)
+// Cumulative: all deals that have reached at least each stage
 const STEP_LABELS: Record<string, string> = {
   Lead: 'Lead', Qualified: 'Qualifié', Scoping: 'Scoping',
   'Proposal Sent': 'Proposition', Negotiation: 'Négociation',
@@ -79,7 +69,88 @@ function Btn({ active, onClick, children }: { active: boolean; onClick: () => vo
   )
 }
 
-// ── Bars view (cumulative, CSS) ─────────────────────────────────────────────
+// ── Entonnoir (CSS centré, largeur ∝ CA×gut) ────────────────────────────────
+
+function FunnelStage({ stage, maxValue, isLast }: {
+  stage: ReturnType<typeof buildFunnelData>[0]
+  maxValue: number
+  isLast: boolean
+}) {
+  const pct = maxValue > 0 ? Math.max(6, (stage.value / maxValue) * 100) : 6
+  const [hovered, setHovered] = useState(false)
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
+      {/* Barre centrée, largeur ∝ CA×gut */}
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          width: `${pct}%`,
+          height: 30,
+          background: stage.fill,
+          borderRadius: 4,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          transition: 'width 0.45s ease, opacity 0.15s',
+          opacity: hovered ? 0.85 : 1,
+          cursor: 'default',
+          position: 'relative',
+        }}
+      >
+        {stage.count > 0 && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#fff', whiteSpace: 'nowrap' }}>
+            {stage.count}
+          </span>
+        )}
+        {/* Tooltip au survol */}
+        {hovered && (
+          <div style={{
+            position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)',
+            marginTop: 6, zIndex: 10,
+            background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+            borderRadius: 8, padding: '7px 11px', fontSize: 'var(--fs-xs)',
+            whiteSpace: 'nowrap', pointerEvents: 'none',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+          }}>
+            <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 3 }}>{stage.name}</div>
+            <div style={{ color: 'var(--text-secondary)' }}>{stage.count} deal{stage.count !== 1 ? 's' : ''}</div>
+            {stage.value > 0 && (
+              <div style={{ color: 'var(--accent)', fontWeight: 600, marginTop: 2 }}>
+                CA×gut {fmtCurrency(stage.value)}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Étiquette sous la barre */}
+      <div style={{
+        width: `${pct}%`, display: 'flex', justifyContent: 'space-between',
+        padding: '2px 4px', boxSizing: 'border-box',
+      }}>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {stage.name}
+        </span>
+        {stage.value > 0 && (
+          <span style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 600, whiteSpace: 'nowrap', marginLeft: 4 }}>
+            {fmtCurrency(stage.value)}
+          </span>
+        )}
+      </div>
+
+      {/* Connecteur trapézoïdal vers l'étape suivante */}
+      {!isLast && (
+        <div style={{ height: 4, width: '100%', display: 'flex', justifyContent: 'center' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: `${stage.fill}33` }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Histogramme (barres CSS cumulatives) ───────────────────────────────────
 
 function StepBar({ step, maxCount, convRate, isLast }: {
   step: { label: string; count: number; color: string }
@@ -110,43 +181,6 @@ function StepBar({ step, maxCount, convRate, isLast }: {
   )
 }
 
-// ── Custom tooltip pour le funnel Recharts ─────────────────────────────────
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function FunnelTooltip({ active, payload }: any) {
-  if (!active || !payload?.length) return null
-  const d = payload[0].payload as ReturnType<typeof buildFunnelData>[0]
-  return (
-    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: '8px 12px', fontSize: 'var(--fs-xs)' }}>
-      <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--text-primary)' }}>{d.name}</div>
-      <div style={{ color: 'var(--text-secondary)' }}>{d.count} deal{d.count !== 1 ? 's' : ''}</div>
-      {d.value > 0 && <div style={{ color: 'var(--accent)', fontWeight: 600, marginTop: 2 }}>CA×gut {fmtCurrency(d.value)}</div>}
-    </div>
-  )
-}
-
-// ── Custom label affiché à droite de chaque barre ──────────────────────────
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function BarLabel({ x, y, width, height, value, index, funnelData }: any) {
-  const item = funnelData[index]
-  if (!item || item.count === 0) return null
-  const lx = (x ?? 0) + (width ?? 0) + 8
-  const my = (y ?? 0) + (height ?? 0) / 2
-  return (
-    <g>
-      <text x={lx} y={my - 4} fill="var(--text-secondary)" fontSize={11} fontWeight={600} dominantBaseline="auto">
-        {value} deal{value !== 1 ? 's' : ''}
-      </text>
-      {item.value > 0 && (
-        <text x={lx} y={my + 9} fill="var(--accent)" fontSize={10} dominantBaseline="auto">
-          {fmtCurrency(item.value)}
-        </text>
-      )}
-    </g>
-  )
-}
-
 // ── Main ───────────────────────────────────────────────────────────────────
 
 export function FunnelChart({ projects }: FunnelChartProps) {
@@ -155,6 +189,7 @@ export function FunnelChart({ projects }: FunnelChartProps) {
   const funnelData = useMemo(() => buildFunnelData(projects), [projects])
   const barsData = useMemo(() => buildBarsData(projects), [projects])
   const maxCount = barsData.reduce((acc, s) => Math.max(acc, s.count), 0)
+  const maxValue = funnelData.reduce((acc, s) => Math.max(acc, s.value), 0)
 
   if (projects.length === 0) {
     return <div style={{ width: '100%', height: 280, borderRadius: 12, background: 'var(--bg-page)', opacity: 0.5 }} />
@@ -180,39 +215,16 @@ export function FunnelChart({ projects }: FunnelChartProps) {
       </div>
 
       {mode === 'funnel' ? (
-        <ResponsiveContainer width="100%" height={320}>
-          <BarChart
-            data={funnelData}
-            layout="vertical"
-            margin={{ top: 4, right: 160, left: 8, bottom: 4 }}
-          >
-            <CartesianGrid horizontal={false} stroke="rgba(166,201,206,0.08)" />
-            <YAxis
-              dataKey="name"
-              type="category"
-              tickLine={false}
-              axisLine={false}
-              tick={{ fill: 'var(--text-secondary)', fontSize: 12, fontWeight: 500 }}
-              width={120}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '8px 0' }}>
+          {funnelData.map((stage, i) => (
+            <FunnelStage
+              key={stage.status}
+              stage={stage}
+              maxValue={maxValue}
+              isLast={i === funnelData.length - 1}
             />
-            <XAxis
-              type="number"
-              tickLine={false}
-              axisLine={false}
-              tick={{ fill: 'var(--text-muted)', fontSize: 11 }}
-              allowDecimals={false}
-            />
-            <Tooltip content={<FunnelTooltip />} cursor={{ fill: 'rgba(166,201,206,0.06)' }} />
-            <Bar dataKey="count" radius={[0, 4, 4, 0]} barSize={26}
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              label={(props: any) => <BarLabel {...props} funnelData={funnelData} />}
-            >
-              {funnelData.map((entry, i) => (
-                <Cell key={i} fill={entry.fill} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
+          ))}
+        </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {barsData.map((step, i) => {
