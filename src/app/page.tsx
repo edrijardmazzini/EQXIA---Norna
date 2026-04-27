@@ -131,6 +131,9 @@ function loadSettingsFromStorage(): RuntimeSettings {
   }
 }
 
+// Toggle UI win rate pour vues prévisionnelles (gut feeling par défaut)
+let __WIN_UI__: 'gut' | 'auto' = 'gut'
+
 // ─── Taux historiques (chargés au mount, par /api/rates/history) ──────────────
 // Format : { "EUR": [{ date: "2026-04-15", rate: 49.2 }, ...], ... }
 // Trié ascendant par date côté API. Lookup binaire par scan linéaire.
@@ -164,13 +167,9 @@ function normalizeWin(value: number | undefined | null): number {
 function getWinRate(p: Project): number {
   const gut = normalizeWin(p.winPercent)
   const auto = normalizeWin(p.winAuto)
-  switch (__SETTINGS__.winPref) {
-    case "gut-only":     return gut
-    case "auto-only":    return auto
-    case "auto-then-gut": return auto > 0 ? auto : gut
-    case "gut-then-auto":
-    default:              return gut > 0 ? gut : auto
-  }
+  // Le toggle UI prend le dessus sur __SETTINGS__.winPref pour les vues prévisionnelles
+  if (__WIN_UI__ === 'auto') return auto > 0 ? auto : gut
+  return gut
 }
 function getCommissionRate(p: Project): number {
   const c = Number(p.commissionPercent || 0)
@@ -412,6 +411,14 @@ export default function DashboardPage() {
   const [revViewCustomStart, setRevViewCustomStart] = useState<string>("")
   const [revViewCustomEnd, setRevViewCustomEnd] = useState<string>("")
   // Toggles Past/Future/Custom pour chart Charges mensuelles
+  // Win rate toggle pour vues prévisionnelles (gut feeling par défaut)
+  const [forecastWinMode, setForecastWinModeRaw] = useState<'gut' | 'auto'>('gut')
+  const setForecastWinMode = (m: 'gut' | 'auto') => {
+    __WIN_UI__ = m
+    setForecastWinModeRaw(m)
+    setProjects(prev => [...prev])
+  }
+
   const [depViewMode, setDepViewMode] = useState<"past" | "future" | "custom">("past")
   const [depViewPast, setDepViewPast] = useState<"all" | "12m" | "6m" | "3m">("all")
   const [depViewFuture, setDepViewFuture] = useState<"12m" | "6m" | "3m">("3m")
@@ -1562,6 +1569,8 @@ export default function DashboardPage() {
               onEditDepense={(d: Depense) => setEditDepense(d)}
               currentDossier={currentDossier}
               fyStartYear={fyStartYear}
+              forecastWinMode={forecastWinMode}
+              setForecastWinMode={setForecastWinMode}
             />
           ) : (
           <>
@@ -1644,6 +1653,7 @@ export default function DashboardPage() {
             totals={{ ca: heroTotalCA, rev: heroTotalRev, dep: heroTotalDep, sal: heroTotalSal, ebitda: heroTotalEbitda }}
             projected={{ ca: heroProjectedCA, rev: heroProjectedRev, dep: heroProjectedDep, sal: heroProjectedSal, ebitda: heroProjectedEbitda }}
             fyLabel={fy.label}
+            forecastWinMode={forecastWinMode} setForecastWinMode={setForecastWinMode}
           />
 
           {/* ── Rows Revenus + Dépenses (ordre vertical : Revenus au-dessus) ── */}
@@ -1930,6 +1940,9 @@ export default function DashboardPage() {
                     customEnd={revViewCustomEnd} setCustomEnd={setRevViewCustomEnd}
                     fyLabel={fy.label}
                   />
+                  {(revViewMode === "future" || revViewMode === "custom") && (
+                    <WinRateToggle mode={forecastWinMode} onChange={setForecastWinMode} />
+                  )}
                 </div>
               }
               renderExpanded={() => {
@@ -3747,7 +3760,7 @@ function Badge({ c, l, v }: { c: string; l: string; v: string }) {
 }
 
 // ───────── Onglet Prévisionnel : charts futurs + listings modifiables ─────────
-function PrevisionnelView({ projects, employees, depenses, recurringCriticalMensuel, salaireMensuel, salaireForMonth, onEditProject, onEditProjectHighlight, onEditDepense, currentDossier, fyStartYear }: any) {
+function PrevisionnelView({ projects, employees, depenses, recurringCriticalMensuel, salaireMensuel, salaireForMonth, onEditProject, onEditProjectHighlight, onEditDepense, currentDossier, fyStartYear, forecastWinMode, setForecastWinMode }: any) {
   type FutureRange = "1m" | "3m" | "6m" | "12m" | "fy"
   const [futureRange, setFutureRange] = useState<FutureRange>("fy")
 
@@ -3867,7 +3880,9 @@ function PrevisionnelView({ projects, employees, depenses, recurringCriticalMens
             Projections basées sur les projets futurs (pondérés Win %), salaires constants et dépenses récurrentes critiques.
           </div>
         </div>
-        <div style={{ display: "flex", gap: 4, background: "var(--bg-input)", padding: 3, borderRadius: 6, border: "1px solid var(--border-subtle)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          {forecastWinMode !== undefined && <WinRateToggle mode={forecastWinMode} onChange={setForecastWinMode} />}
+          <div style={{ display: "flex", gap: 4, background: "var(--bg-input)", padding: 3, borderRadius: 6, border: "1px solid var(--border-subtle)" }}>
           {(["1m", "3m", "6m", "12m", "fy"] as FutureRange[]).map(r => (
             <button
               key={r}
@@ -3887,6 +3902,7 @@ function PrevisionnelView({ projects, employees, depenses, recurringCriticalMens
               {r === "fy" ? "Y fiscal" : r}
             </button>
           ))}
+          </div>
         </div>
       </div>
 
@@ -4314,7 +4330,7 @@ const HERO_SERIES_PROJECTED = [
   { key: "salaires-p", label: "Salaires proj.", color: "#f97316", type: "area" },
 ] as const
 
-function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPast, heroFuture, setHeroFuture, heroCustomStart, setHeroCustomStart, heroCustomEnd, setHeroCustomEnd, hidden, toggleHidden, fullscreen, setFullscreen, totals, projected, fyLabel }: any) {
+function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPast, heroFuture, setHeroFuture, heroCustomStart, setHeroCustomStart, heroCustomEnd, setHeroCustomEnd, hidden, toggleHidden, fullscreen, setFullscreen, totals, projected, fyLabel, forecastWinMode, setForecastWinMode }: any) {
   const showSeries = (key: string) => !hidden.has(key)
   const [chartType, setChartType] = useState<"area" | "bar">("area")
 
@@ -4434,6 +4450,9 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
           )}
         </div>
       )}
+      {(heroMode === "future" || heroMode === "custom") && forecastWinMode !== undefined && (
+        <WinRateToggle mode={forecastWinMode} onChange={setForecastWinMode} />
+      )}
     </div>
   )
 
@@ -4519,6 +4538,15 @@ function ViewRangeToggle({ mode, setMode, past, setPast, future, setFuture, cust
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function WinRateToggle({ mode, onChange }: { mode: 'gut' | 'auto'; onChange: (m: 'gut' | 'auto') => void }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <span style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>Win rate</span>
+      <Seg value={mode} onChange={v => onChange(v as 'gut' | 'auto')} options={[["gut", "Gut feeling"], ["auto", "Auto"]]} />
     </div>
   )
 }
