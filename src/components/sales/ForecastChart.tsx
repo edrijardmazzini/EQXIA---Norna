@@ -3,193 +3,141 @@
 import { useState, useMemo } from 'react'
 import {
   ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
+  BarChart, Bar,
+  LineChart, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
 import type { Project } from '@/types/sales'
-import { CLOSED_WON, STATUS_COLORS, winFactor, fmtCurrency } from '@/types/sales'
+import { TYPE_COLORS, CLOSED_WON, fmtCurrency } from '@/types/sales'
 
 interface ForecastChartProps {
   projects: Project[]
 }
 
-type Mode = 'best' | 'weighted'
+type WeightMode = 'auto' | 'gut'
+type ChartType = 'line' | 'bar'
 
-const MOIS_NOMS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
+const MOIS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
 
-const PIPELINE_STATUSES = ['Lead', 'Qualified', 'Scoping', 'Proposal Sent', 'Negotiation', 'Verbal Commitment'] as const
-
-type PipelineStatus = typeof PIPELINE_STATUSES[number]
+function getWeight(p: Project, mode: WeightMode): number {
+  if (mode === 'auto') {
+    const v = p.winAuto > 1 ? p.winAuto / 100 : p.winAuto
+    return Math.min(1, Math.max(0, v))
+  }
+  const v = p.winPercent > 1 ? p.winPercent / 100 : p.winPercent
+  return Math.min(1, Math.max(0, v))
+}
 
 interface MonthDatum {
   label: string
-  yearMonth: string
-  Lead: number
-  Qualified: number
-  Scoping: number
-  'Proposal Sent': number
-  Negotiation: number
-  'Verbal Commitment': number
-  Won: number
-  deals: Record<string, Project[]>
+  [type: string]: number | string | Record<string, Project[]>
+  _deals: Record<string, Project[]>
 }
 
-interface TooltipPayload {
-  name: string
-  value: number
-  fill: string
+function buildData(projects: Project[], mode: WeightMode): { months: MonthDatum[]; types: string[] } {
+  const now = new Date()
+  const typesSet = new Set<string>()
+
+  const ymLabels: { ym: string; label: string }[] = []
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
+    ymLabels.push({
+      ym: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      label: `${MOIS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`,
+    })
+  }
+
+  for (const p of projects) {
+    const closeDate = p.expectedCloseDate || p.decisionDate
+    if (!closeDate || !p.type) continue
+    const [cy, cm] = closeDate.split('-')
+    if (!cy || !cm) continue
+    const ym = `${cy}-${cm.padStart(2, '0')}`
+    if (ymLabels.some(m => m.ym === ym)) typesSet.add(p.type)
+  }
+
+  const types = Array.from(typesSet).sort()
+
+  const months: MonthDatum[] = ymLabels.map(({ ym, label }) => {
+    const datum: MonthDatum = { label, _deals: Object.fromEntries(types.map(t => [t, []])) }
+    for (const t of types) datum[t] = 0
+
+    for (const p of projects) {
+      const closeDate = p.expectedCloseDate || p.decisionDate
+      if (!closeDate || !p.type || !typesSet.has(p.type)) continue
+      const [cy, cm] = closeDate.split('-')
+      if (!cy || !cm || `${cy}-${cm.padStart(2, '0')}` !== ym) continue
+
+      const weight = CLOSED_WON.has(p.status) ? 1 : getWeight(p, mode)
+      const amount = (p.quotedAmount || p.finalAmount) * weight
+      ;(datum[p.type] as number) += amount
+      ;(datum._deals as Record<string, Project[]>)[p.type].push(p)
+    }
+
+    return datum
+  })
+
+  return { months, types }
 }
 
-interface CustomTooltipProps {
-  active?: boolean
-  payload?: TooltipPayload[]
-  label?: string
-  allData: MonthDatum[]
-}
+// ── Ctrl button ─────────────────────────────────────────────────────────────
 
-interface ToggleBtnProps {
-  m: Mode
-  label: string
-  current: Mode
-  onClick: (m: Mode) => void
-}
-
-function ToggleBtn({ m, label, current, onClick }: ToggleBtnProps) {
-  const active = current === m
+function Btn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
-      onClick={() => onClick(m)}
+      onClick={onClick}
       style={{
-        padding: '4px 12px',
-        fontSize: 13,
-        fontWeight: active ? 600 : 400,
-        borderRadius: 6,
-        border: active ? '1px solid #A6C9CE' : '1px solid #2a2a3e',
-        background: active ? '#A6C9CE22' : 'transparent',
-        color: active ? '#A6C9CE' : '#64748b',
-        cursor: 'pointer',
+        padding: '4px 11px', fontSize: 12, fontWeight: active ? 600 : 400,
+        borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+        border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
+        background: active ? 'var(--accent-soft)' : 'transparent',
+        color: active ? 'var(--accent)' : 'var(--text-muted)',
         transition: 'all 0.15s',
+        display: 'flex', alignItems: 'center', gap: 5,
       }}
     >
-      {label}
+      {children}
     </button>
   )
 }
 
-function buildForecastData(projects: Project[], mode: Mode): MonthDatum[] {
-  const now = new Date()
-  const months: MonthDatum[] = []
+// ── Tooltip ─────────────────────────────────────────────────────────────────
 
-  for (let i = 0; i < 6; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1)
-    const year = d.getFullYear()
-    const month = d.getMonth()
-    const yearMonth = `${year}-${String(month + 1).padStart(2, '0')}`
-    const label = `${MOIS_NOMS[month]} ${String(year).slice(2)}`
-
-    const datum: MonthDatum = {
-      label,
-      yearMonth,
-      Lead: 0,
-      Qualified: 0,
-      Scoping: 0,
-      'Proposal Sent': 0,
-      Negotiation: 0,
-      'Verbal Commitment': 0,
-      Won: 0,
-      deals: {
-        Lead: [],
-        Qualified: [],
-        Scoping: [],
-        'Proposal Sent': [],
-        Negotiation: [],
-        'Verbal Commitment': [],
-        Won: [],
-      },
-    }
-
-    for (const p of projects) {
-      const closeDate = p.expectedCloseDate || p.decisionDate
-      if (!closeDate) continue
-      const [cy, cm] = closeDate.split('-')
-      if (!cy || !cm) continue
-      const dealYM = `${cy}-${cm.padStart(2, '0')}`
-      if (dealYM !== yearMonth) continue
-
-      const amount = mode === 'weighted'
-        ? (p.quotedAmount || p.finalAmount) * winFactor(p)
-        : (p.quotedAmount || p.finalAmount)
-
-      if (CLOSED_WON.has(p.status)) {
-        datum.Won += amount
-        datum.deals['Won'].push(p)
-      } else if ((PIPELINE_STATUSES as readonly string[]).includes(p.status)) {
-        const s = p.status as PipelineStatus
-        datum[s] += amount
-        datum.deals[s].push(p)
-      }
-    }
-
-    months.push(datum)
-  }
-
-  return months
+interface TooltipEntry {
+  name: string
+  value: number
+  color: string
 }
 
-function CustomTooltip({ active, payload, label, allData }: CustomTooltipProps) {
+function ForecastTooltip({
+  active, payload, label, allData,
+}: {
+  active?: boolean
+  payload?: TooltipEntry[]
+  label?: string
+  allData: MonthDatum[]
+}) {
   if (!active || !payload?.length) return null
-
   const monthData = allData.find(d => d.label === label)
-  if (!monthData) return null
-
-  const activeStatuses = payload
-    .filter(p => p.value > 0)
-    .map(p => p.name)
 
   return (
     <div style={{
-      background: '#1a1a2e',
-      border: '1px solid #2a2a3e',
-      borderRadius: 8,
-      padding: '10px 14px',
-      minWidth: 200,
-      maxWidth: 280,
+      background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+      borderRadius: 8, padding: '10px 14px', minWidth: 200, maxWidth: 300,
+      fontSize: 'var(--fs-xs)',
     }}>
-      <div style={{ fontWeight: 600, marginBottom: 8, color: '#e2e8f0' }}>{label}</div>
-      {activeStatuses.map(status => {
-        const deals = monthData.deals[status] || []
-        if (!deals.length) return null
+      <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>{label}</div>
+      {payload.filter(e => e.value > 0).map(entry => {
+        const deals = monthData ? (monthData._deals as Record<string, Project[]>)[entry.name] || [] : []
         return (
-          <div key={status} style={{ marginBottom: 8 }}>
-            <div style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: STATUS_COLORS[status] || '#94a3b8',
-              marginBottom: 4,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-            }}>
-              {status}
+          <div key={entry.name} style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 'var(--fs-2xs)', fontWeight: 600, color: entry.color, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 3 }}>
+              {entry.name} — {fmtCurrency(entry.value)}
             </div>
             {deals.map(d => (
-              <div key={d.id} style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 12,
-                fontSize: 12,
-                color: '#cbd5e1',
-                paddingLeft: 8,
-              }}>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 140 }}>
-                  {d.name}
-                </span>
-                <span style={{ flexShrink: 0, color: '#94a3b8' }}>
-                  {fmtCurrency(d.quotedAmount || d.finalAmount, d.currency)}
-                </span>
+              <div key={d.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, paddingLeft: 8, color: 'var(--text-secondary)' }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>{d.name}</span>
+                <span style={{ flexShrink: 0, color: 'var(--text-muted)' }}>{fmtCurrency(d.quotedAmount || d.finalAmount, d.currency)}</span>
               </div>
             ))}
           </div>
@@ -199,79 +147,103 @@ function CustomTooltip({ active, payload, label, allData }: CustomTooltipProps) 
   )
 }
 
-export default function ForecastChart({ projects }: ForecastChartProps) {
-  const [mode, setMode] = useState<Mode>('weighted')
+// ── Main ─────────────────────────────────────────────────────────────────────
 
-  const data = useMemo(
-    () => buildForecastData(projects, mode),
-    [projects, mode],
+export function ForecastChart({ projects }: ForecastChartProps) {
+  const [weightMode, setWeightMode] = useState<WeightMode>('auto')
+  const [chartType, setChartType] = useState<ChartType>('line')
+
+  const { months, types } = useMemo(
+    () => buildData(projects, weightMode),
+    [projects, weightMode],
   )
 
   if (projects.length === 0) {
-    return (
-      <div style={{
-        width: '100%',
-        height: 320,
-        borderRadius: 12,
-        background: '#1e1e2e',
-        animation: 'pulse 2s infinite',
-      }} />
-    )
+    return <div style={{ width: '100%', height: 320, borderRadius: 8, background: 'var(--bg-page)', opacity: 0.5 }} />
   }
+
+  const tooltipContent = (p: { active?: boolean; payload?: unknown; label?: unknown }) => (
+    <ForecastTooltip
+      active={p.active}
+      payload={p.payload as TooltipEntry[]}
+      label={p.label as string}
+      allData={months}
+    />
+  )
+
+  const sharedAxisStyle = { fill: 'var(--text-muted)', fontSize: 11 }
+  const legendFormatter = (v: string) => <span style={{ color: 'var(--text-secondary)' }}>{v}</span>
 
   return (
     <div style={{ width: '100%' }}>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <ToggleBtn m='best' label='Best Case' current={mode} onClick={setMode} />
-        <ToggleBtn m='weighted' label='Pondéré' current={mode} onClick={setMode} />
+      {/* Controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 4 }}>
+          <Btn active={weightMode === 'auto'} onClick={() => setWeightMode('auto')}>% auto</Btn>
+          <Btn active={weightMode === 'gut'} onClick={() => setWeightMode('gut')}>% gut feeling</Btn>
+        </div>
+        <div style={{ width: 1, height: 18, background: 'var(--border-subtle)', margin: '0 4px' }} />
+        <div style={{ display: 'flex', gap: 4 }}>
+          <Btn active={chartType === 'line'} onClick={() => setChartType('line')}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <polyline points="1,12 5,5 8,8 13,2" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" fill="none"/>
+            </svg>
+            Courbes
+          </Btn>
+          <Btn active={chartType === 'bar'} onClick={() => setChartType('bar')}>
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <rect x="1" y="6" width="3" height="7" rx="1" fill="currentColor"/>
+              <rect x="5.5" y="3" width="3" height="10" rx="1" fill="currentColor"/>
+              <rect x="10" y="1" width="3" height="12" rx="1" fill="currentColor"/>
+            </svg>
+            Histogramme
+          </Btn>
+        </div>
       </div>
-      <ResponsiveContainer width='100%' height={320}>
-        <BarChart data={data} margin={{ top: 4, right: 8, left: 8, bottom: 0 }}>
-          <XAxis
-            dataKey='label'
-            tick={{ fill: '#64748b', fontSize: 12 }}
-            axisLine={false}
-            tickLine={false}
-          />
-          <YAxis
-            tick={{ fill: '#64748b', fontSize: 12 }}
-            axisLine={false}
-            tickLine={false}
-            tickFormatter={v => fmtCurrency(v as number)}
-            width={64}
-          />
-          <Tooltip
-            content={(props) => (
-              <CustomTooltip
-                active={props.active}
-                payload={props.payload as unknown as TooltipPayload[] | undefined}
-                label={props.label as string | undefined}
-                allData={data}
+
+      <ResponsiveContainer width="100%" height={300}>
+        {chartType === 'line' ? (
+          <LineChart data={months} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+            <XAxis dataKey="label" tick={sharedAxisStyle} axisLine={false} tickLine={false} />
+            <YAxis tick={sharedAxisStyle} axisLine={false} tickLine={false} tickFormatter={v => fmtCurrency(v as number)} width={68} />
+            <Tooltip content={tooltipContent} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+            <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} formatter={legendFormatter} />
+            {types.map(t => (
+              <Line
+                key={t}
+                type="monotone"
+                dataKey={t}
+                stroke={TYPE_COLORS[t] || '#6b7280'}
+                strokeWidth={2}
+                dot={{ r: 3, fill: TYPE_COLORS[t] || '#6b7280', strokeWidth: 0 }}
+                activeDot={{ r: 5 }}
+                name={t}
               />
-            )}
-            cursor={{ fill: '#ffffff08' }}
-          />
-          <Legend
-            wrapperStyle={{ fontSize: 12, paddingTop: 12 }}
-            formatter={(value) => (
-              <span style={{ color: '#94a3b8' }}>{value}</span>
-            )}
-          />
-          <Bar dataKey='Won' stackId='a' fill='#4ade80' name='Won' radius={[0, 0, 0, 0]} />
-          {PIPELINE_STATUSES.map((s, i) => (
-            <Bar
-              key={s}
-              dataKey={s}
-              stackId='a'
-              fill={STATUS_COLORS[s]}
-              name={s}
-              radius={i === PIPELINE_STATUSES.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
-            />
-          ))}
-        </BarChart>
+            ))}
+          </LineChart>
+        ) : (
+          <BarChart data={months} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
+            <XAxis dataKey="label" tick={sharedAxisStyle} axisLine={false} tickLine={false} />
+            <YAxis tick={sharedAxisStyle} axisLine={false} tickLine={false} tickFormatter={v => fmtCurrency(v as number)} width={68} />
+            <Tooltip content={tooltipContent} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
+            <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} formatter={legendFormatter} />
+            {types.map((t, i) => (
+              <Bar
+                key={t}
+                dataKey={t}
+                stackId="a"
+                fill={TYPE_COLORS[t] || '#6b7280'}
+                name={t}
+                radius={i === types.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+              />
+            ))}
+          </BarChart>
+        )}
       </ResponsiveContainer>
     </div>
   )
 }
 
-export { ForecastChart }
+export default ForecastChart

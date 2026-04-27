@@ -20,7 +20,7 @@ import { SourceChart } from '@/components/sales/SourceChart'
 import { ClientCard } from '@/components/sales/ClientCard'
 import { ClientDetail } from '@/components/sales/ClientDetail'
 import type { Project, Client } from '@/types/sales'
-import { CLOSED_WON, CLOSED_LOST, PIPELINE_COLS, fmtCurrency, winFactor } from '@/types/sales'
+import { CLOSED_WON, CLOSED_LOST, fmtCurrency, winFactor } from '@/types/sales'
 import { useEffect } from 'react'
 
 type Tab = 'pipeline' | 'forecast' | 'clients'
@@ -192,6 +192,13 @@ export default function SalesPage() {
             employees={employees}
             onProjectsChange={setLocalProjects}
             ownerFilter={ownerFilter}
+            onClientClick={(clientId) => {
+              const client = clients.find(c => c.id === clientId)
+              if (client) {
+                setTab('clients')
+                setSelectedClient(client)
+              }
+            }}
           />
         )}
 

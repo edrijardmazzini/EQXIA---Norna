@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import type { Project, Client, Employee } from '@/types/sales'
-import { PIPELINE_COLS, CLOSED_WON, CLOSED_LOST, fmtCurrency, winFactor } from '@/types/sales'
+import { PIPELINE_COLS, CLOSED_WON, CLOSED_LOST, TYPE_COLORS, fmtCurrency, winFactor } from '@/types/sales'
 import { DealCard } from './DealCard'
 import { Button } from '@/components/ui/Button'
 
@@ -27,17 +27,19 @@ interface KanbanBoardProps {
   clients: Client[]
   employees: Employee[]
   onProjectsChange: (projects: Project[]) => void
+  onClientClick?: (clientId: string) => void
   ownerFilter?: string
   clientFilter?: string
 }
 
-export function KanbanBoard({ projects, clients, employees, onProjectsChange, ownerFilter, clientFilter }: KanbanBoardProps) {
+export function KanbanBoard({ projects, clients, employees, onProjectsChange, onClientClick, ownerFilter, clientFilter }: KanbanBoardProps) {
   const [selectedDeal, setSelectedDeal] = useState<Project | null>(null)
   const [editState, setEditState] = useState<Partial<Project>>({})
   const [editSaving, setEditSaving] = useState(false)
   const [lostPrompt, setLostPrompt] = useState<{ dealId: string; targetStatus: string } | null>(null)
   const [showQuickEntry, setShowQuickEntry] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [typeFilter, setTypeFilter] = useState('')
   const [form, setForm] = useState({
     name: '', clientId: '', type: '', quotedAmount: '', currency: 'MUR',
     ownerId: '', nextAction: '', nextActionDate: '', winPercent: 20,
@@ -47,9 +49,12 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, ow
     !CLOSED_WON.has(p.status) && !CLOSED_LOST.has(p.status) && p.status !== 'Completed' && p.status !== 'On Hold'
   )
 
+  const pipelineTypes = Array.from(new Set(pipelineDeals.map(d => d.type).filter(Boolean))).sort()
+
   const filtered = pipelineDeals.filter(d => {
     if (ownerFilter && d.ownerName !== ownerFilter) return false
     if (clientFilter && !d.clientIds.includes(clientFilter)) return false
+    if (typeFilter && d.type !== typeFilter) return false
     return true
   })
 
@@ -136,9 +141,39 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, ow
 
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
-          {filtered.length} deal{filtered.length !== 1 ? 's' : ''} actifs
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+        {/* Type filter chips */}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1 }}>
+          <button
+            onClick={() => setTypeFilter('')}
+            style={{
+              padding: '4px 10px', fontSize: 'var(--fs-xs)', borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit',
+              border: typeFilter === '' ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
+              background: typeFilter === '' ? 'var(--accent-soft)' : 'transparent',
+              color: typeFilter === '' ? 'var(--accent)' : 'var(--text-muted)',
+              transition: 'all 0.12s',
+            }}
+          >
+            Tous
+          </button>
+          {pipelineTypes.map(t => (
+            <button
+              key={t}
+              onClick={() => setTypeFilter(prev => prev === t ? '' : t)}
+              style={{
+                padding: '4px 10px', fontSize: 'var(--fs-xs)', borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit',
+                border: typeFilter === t ? `1px solid ${TYPE_COLORS[t] || 'var(--accent)'}` : '1px solid var(--border-subtle)',
+                background: typeFilter === t ? `${TYPE_COLORS[t] || 'var(--accent)'}22` : 'transparent',
+                color: typeFilter === t ? (TYPE_COLORS[t] || 'var(--accent)') : 'var(--text-muted)',
+                transition: 'all 0.12s',
+              }}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
+        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+          {filtered.length} deal{filtered.length !== 1 ? 's' : ''}
         </span>
         <Button variant="primary" size="sm" onClick={() => setShowQuickEntry(true)}>+ Nouveau deal</Button>
       </div>
@@ -279,8 +314,28 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, ow
         <div onClick={e => e.stopPropagation()} style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 50, width: 540, maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-modal)', padding: 28 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 20 }}>
             <div>
-              <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, marginBottom: 2 }}>{selectedDeal.name}</div>
-              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{selectedDeal.clientName}</div>
+              <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, marginBottom: 4 }}>{selectedDeal.name}</div>
+              {selectedDeal.clientName && selectedDeal.clientName !== 'N/A' ? (
+                <button
+                  onClick={() => {
+                    if (onClientClick && selectedDeal.clientIds[0]) {
+                      setSelectedDeal(null)
+                      onClientClick(selectedDeal.clientIds[0])
+                    }
+                  }}
+                  style={{
+                    fontSize: 'var(--fs-sm)', color: onClientClick ? 'var(--accent)' : 'var(--text-muted)',
+                    background: 'none', border: 'none', padding: 0, cursor: onClientClick ? 'pointer' : 'default',
+                    fontFamily: 'inherit', textDecoration: onClientClick ? 'underline' : 'none',
+                    textDecorationColor: 'rgba(166,201,206,0.4)',
+                    textUnderlineOffset: 3,
+                  }}
+                >
+                  {selectedDeal.clientName} →
+                </button>
+              ) : (
+                <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-muted)' }}>{selectedDeal.clientName}</div>
+              )}
             </div>
             <div style={{ textAlign: 'right', flexShrink: 0 }}>
               <div style={{ fontSize: 'var(--fs-xl)', fontWeight: 700, color: 'var(--accent)' }}>
