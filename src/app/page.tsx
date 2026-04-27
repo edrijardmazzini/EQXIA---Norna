@@ -12,7 +12,7 @@ import {
   BarChart3, Telescope, Settings, TrendingUp, Percent, Wallet, Zap,
   CheckCircle2, AlertTriangle, XCircle, Monitor, Moon, Sun, BarChart2, LineChart,
   Database, AlertOctagon, AlertCircle, Users, DollarSign, RefreshCw,
-  Briefcase, UserCheck, CalendarX, ShieldAlert, Info,
+  Briefcase, UserCheck, CalendarX, ShieldAlert, Info, ExternalLink,
 } from "lucide-react"
 import { EqxiaLoadingScreen } from "@/components/eqxia"
 
@@ -1558,6 +1558,7 @@ export default function DashboardPage() {
               salaireMensuel={salaireMensuel}
               salaireForMonth={salaireForMonth}
               onEditProject={(p: Project) => setEditProject(p)}
+              onEditProjectHighlight={(p: Project, missing: string[]) => { setEditProjectMissing(missing); setEditProject(p) }}
               onEditDepense={(d: Depense) => setEditDepense(d)}
               currentDossier={currentDossier}
               fyStartYear={fyStartYear}
@@ -3746,7 +3747,7 @@ function Badge({ c, l, v }: { c: string; l: string; v: string }) {
 }
 
 // ───────── Onglet Prévisionnel : charts futurs + listings modifiables ─────────
-function PrevisionnelView({ projects, employees, depenses, recurringCriticalMensuel, salaireMensuel, salaireForMonth, onEditProject, onEditDepense, currentDossier, fyStartYear }: any) {
+function PrevisionnelView({ projects, employees, depenses, recurringCriticalMensuel, salaireMensuel, salaireForMonth, onEditProject, onEditProjectHighlight, onEditDepense, currentDossier, fyStartYear }: any) {
   type FutureRange = "1m" | "3m" | "6m" | "12m" | "fy"
   const [futureRange, setFutureRange] = useState<FutureRange>("fy")
 
@@ -4082,7 +4083,16 @@ function PrevisionnelView({ projects, employees, depenses, recurringCriticalMens
       </div>
 
       {/* Database Review — en bas du Prévisionnel */}
-      <DBReviewPanel projects={projects} employees={employees} depenses={depenses} />
+      <DBReviewPanel
+        projects={projects}
+        employees={employees}
+        depenses={depenses}
+        onEditProject={(p: Project, missing?: string[]) => {
+          if (missing?.length) onEditProjectHighlight?.(p, missing)
+          else onEditProject?.(p)
+        }}
+        onEditDepense={onEditDepense}
+      />
     </div>
   )
 }
@@ -4091,7 +4101,11 @@ function PrevisionnelView({ projects, employees, depenses, recurringCriticalMens
 type IssueLevel = "critical" | "warning" | "info"
 interface DBIssue { level: IssueLevel; source: "projects" | "employees" | "depenses"; entity: string; entityId: string; field: string; message: string }
 
-function DBReviewPanel({ projects, employees, depenses }: { projects: Project[]; employees: Employee[]; depenses: Depense[] }) {
+function DBReviewPanel({ projects, employees, depenses, onEditProject, onEditDepense }: {
+  projects: Project[]; employees: Employee[]; depenses: Depense[]
+  onEditProject?: (p: Project, missing?: string[]) => void
+  onEditDepense?: (d: Depense) => void
+}) {
   const [filter, setFilter] = useState<"all" | "critical" | "warning">("critical")
   const [section, setSection] = useState<"all" | "projects" | "employees" | "depenses">("all")
 
@@ -4233,19 +4247,45 @@ function DBReviewPanel({ projects, employees, depenses }: { projects: Project[];
               </tr>
             </thead>
             <tbody>
-              {filtered.map((issue, i) => (
-                <tr key={i} style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", background: issue.level === "critical" ? "rgba(239,68,68,0.03)" : "transparent" }}>
-                  <td style={{ ...tdStyle }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, background: issue.level === "critical" ? "rgba(239,68,68,0.12)" : "rgba(250,204,21,0.10)", color: issue.level === "critical" ? "#ef4444" : "#facc15", fontWeight: 700, fontSize: "var(--fs-2xs)", width: "fit-content" }}>
-                      <IssueIcon level={issue.level} />
-                      {issue.level === "critical" ? "Critical" : "Warning"}
-                    </span>
-                  </td>
-                  <td style={{ ...tdStyle, fontWeight: 600, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{issue.entity}</td>
-                  <td style={{ ...tdStyle, color: "var(--accent)", fontFamily: "monospace", fontSize: "var(--fs-2xs)" }}>{issue.field}</td>
-                  <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{issue.message}</td>
-                </tr>
-              ))}
+              {filtered.map((issue, i) => {
+                const handleClick = () => {
+                  if (issue.source === "projects") {
+                    const p = projects.find((x: Project) => x.id === issue.entityId)
+                    if (p) onEditProject?.(p, [issue.field])
+                  } else if (issue.source === "depenses") {
+                    const d = depenses.find((x: Depense) => x.id === issue.entityId)
+                    if (d) onEditDepense?.(d)
+                  } else if (issue.source === "employees") {
+                    const notionId = issue.entityId.replace(/-/g, "")
+                    window.open(`https://www.notion.so/${notionId}`, "_blank", "noopener")
+                  }
+                }
+                const isClickable = issue.source === "projects" ? !!onEditProject : issue.source === "depenses" ? !!onEditDepense : true
+                return (
+                  <tr
+                    key={i}
+                    onClick={handleClick}
+                    style={{ borderBottom: "1px solid rgba(166,201,206,0.05)", background: issue.level === "critical" ? "rgba(239,68,68,0.03)" : "transparent", cursor: isClickable ? "pointer" : "default", transition: "background 0.12s" }}
+                    onMouseEnter={e => { if (isClickable) e.currentTarget.style.background = "rgba(166,201,206,0.07)" }}
+                    onMouseLeave={e => { e.currentTarget.style.background = issue.level === "critical" ? "rgba(239,68,68,0.03)" : "transparent" }}
+                  >
+                    <td style={{ ...tdStyle }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 4, background: issue.level === "critical" ? "rgba(239,68,68,0.12)" : "rgba(250,204,21,0.10)", color: issue.level === "critical" ? "#ef4444" : "#facc15", fontWeight: 700, fontSize: "var(--fs-2xs)", width: "fit-content" }}>
+                        <IssueIcon level={issue.level} />
+                        {issue.level === "critical" ? "Critical" : "Warning"}
+                      </span>
+                    </td>
+                    <td style={{ ...tdStyle, fontWeight: 600, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        {issue.source === "employees" && <ExternalLink size={10} color="var(--text-muted)" style={{ flexShrink: 0 }} />}
+                        {issue.entity}
+                      </span>
+                    </td>
+                    <td style={{ ...tdStyle, color: "var(--accent)", fontFamily: "monospace", fontSize: "var(--fs-2xs)" }}>{issue.field}</td>
+                    <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{issue.message}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
