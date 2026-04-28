@@ -74,6 +74,9 @@
     --radius-card:    14px;
     --radius-btn:     8px;
     --radius-input:   6px;
+    --radius-pill:    20px;
+    --radius-badge:   3px;
+    --radius-chip:    6px;
 
     /* Glassmorphic surfaces */
     --bg-panel:      rgba(12, 18, 24, 0.72);
@@ -96,12 +99,54 @@
     --fs-2xl:  24px;
     --fs-3xl:  30px;
 
+    /* KPI value typography */
+    --fs-kpi:  28px;
+    --fw-kpi:  800;
+    --ls-kpi:  -0.03em;
+
     /* ─── Layout tokens ───────────────────────────────────────────────── */
     --header-height:   54px;
     --header-logo-h:   40px;
     --header-app-fs:   var(--fs-md);
     --loading-logo-h:  140px;
     --loading-app-fs:  var(--fs-2xl);
+    --content-max:     1200px;
+    --content-px:      20px;
+    --content-py:      24px;
+    --gap-grid:        16px;
+    --gap-grid-sm:     12px;
+    --gap-grid-lg:     20px;
+
+    /* ─── Card tokens (top-level glassmorphic surfaces) ───────────────── */
+    --card-bg:         var(--bg-panel);
+    --card-border:     1px solid rgba(166, 201, 206, 0.10);
+    --card-radius:     var(--radius-card);
+    --card-padding:    20px;
+    --card-padding-sm: 14px 16px;
+    --card-blur:       blur(16px);
+    --card-shadow:     var(--shadow-card);
+
+    /* ─── KPI icon-box tokens ─────────────────────────────────────────── */
+    --icon-box:        36px;
+    --icon-box-radius: 10px;
+
+    /* ─── Tab tokens ──────────────────────────────────────────────────── */
+    --tab-fs:           var(--fs-sm);
+    --tab-fw:           600;
+    --tab-py:           10px;
+    --tab-px:           20px;
+    --tab-gap:          4px;
+    --tab-indicator:    2px;
+    --tab-color:        var(--text-secondary);
+    --tab-color-active: var(--accent);
+
+    /* ─── Table tokens ────────────────────────────────────────────────── */
+    --th-py:    10px;
+    --th-px:    16px;
+    --th-fs:    var(--fs-2xs);
+    --th-fw:    500;
+    --th-ls:    0.05em;
+    --th-color: var(--text-muted);
   }
 
   /* ─── Light theme overrides ────────────────────────────────────────── */
@@ -149,6 +194,9 @@
     --text-accent:   #1a3540;
     --text-subtle:   rgba(26, 85, 96, 0.45);
     --text-brand:    #1a5560;
+
+    /* Card border slightly stronger on light bg for visibility */
+    --card-border:   1px solid rgba(166, 201, 206, 0.30);
   }
 
   /* ─── Base reset ───────────────────────────────────────────────────── */

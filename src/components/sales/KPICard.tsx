@@ -8,19 +8,30 @@ interface KPICardProps {
 export function KPICard({ label, value, sub, accent }: KPICardProps) {
   return (
     <div style={{
-      background: 'var(--bg-card)',
-      border: '1px solid var(--border-subtle)',
-      borderRadius: 'var(--radius-card)',
-      padding: '18px 20px',
+      background: 'var(--card-bg)',
+      backdropFilter: 'var(--card-blur)',
+      WebkitBackdropFilter: 'var(--card-blur)',
+      border: 'var(--card-border)',
+      borderRadius: 'var(--card-radius)',
+      boxShadow: 'var(--card-shadow)',
+      padding: 'var(--card-padding)',
+      display: 'flex',
+      flexDirection: 'column',
     }}>
-      <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
+      <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', fontWeight: 500, marginBottom: 12 }}>
         {label}
       </div>
-      <div style={{ fontSize: 'var(--fs-2xl)', fontWeight: 700, color: accent ? 'var(--accent)' : 'var(--text-primary)', lineHeight: 1 }}>
+      <div style={{
+        fontSize: 'var(--fs-kpi)',
+        fontWeight: 'var(--fw-kpi)' as React.CSSProperties['fontWeight'],
+        letterSpacing: 'var(--ls-kpi)',
+        lineHeight: 1,
+        color: accent ? 'var(--accent)' : 'var(--text-primary)',
+      }}>
         {value}
       </div>
       {sub && (
-        <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 4 }}>{sub}</div>
+        <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', marginTop: 8 }}>{sub}</div>
       )}
     </div>
   )

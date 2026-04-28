@@ -37,9 +37,17 @@ export interface CashflowViewProps {
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 const MFR = ['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc']
-const CARD: React.CSSProperties = { background:'var(--bg-card)', borderRadius:16, border:'1px solid var(--border-subtle)', boxShadow:'var(--shadow-card)', overflow:'hidden' }
-const TH: React.CSSProperties = { padding:'8px 12px', textAlign:'left', fontWeight:600, color:'var(--text-muted)', fontSize:'var(--fs-2xs)', textTransform:'uppercase', letterSpacing:'0.06em', borderBottom:'1px solid rgba(166,201,206,0.08)', whiteSpace:'nowrap' }
-const TD: React.CSSProperties = { padding:'8px 12px', color:'var(--text-primary)', borderBottom:'1px solid rgba(166,201,206,0.05)', fontSize:'var(--fs-xs)' }
+const CARD: React.CSSProperties = {
+  background: 'var(--card-bg)',
+  backdropFilter: 'var(--card-blur)',
+  WebkitBackdropFilter: 'var(--card-blur)',
+  border: 'var(--card-border)',
+  borderRadius: 'var(--card-radius)',
+  boxShadow: 'var(--card-shadow)',
+  overflow: 'hidden',
+}
+const TH: React.CSSProperties = { padding:'var(--th-py) var(--th-px)', textAlign:'left', fontWeight:'var(--th-fw)' as React.CSSProperties['fontWeight'], color:'var(--th-color)', fontSize:'var(--th-fs)', textTransform:'uppercase', letterSpacing:'var(--th-ls)', borderBottom:'1px solid var(--border-subtle)', whiteSpace:'nowrap' }
+const TD: React.CSSProperties = { padding:'8px var(--th-px)', color:'var(--text-primary)', borderBottom:'1px solid rgba(166,201,206,0.05)', fontSize:'var(--fs-xs)' }
 
 const STATUS_CLR: Record<string,string> = {
   Draft:'#94a3b8', Sent:'#60a5fa', Accepted:'#34d399', Paid:'#22c55e',
@@ -277,8 +285,8 @@ function EditModal({ t, onClose, onSaved }: { t: Transaction; onClose: () => voi
     }
   }
 
-  const inputStyle: React.CSSProperties = { width:'100%', padding:'6px 10px', background:'rgba(166,201,206,0.06)', border:'1px solid rgba(166,201,206,0.15)', borderRadius:6, color:'var(--text-primary)', fontSize:'var(--fs-xs)', fontFamily:'inherit', boxSizing:'border-box' }
-  const labelStyle: React.CSSProperties = { fontSize:'var(--fs-2xs)', color:'var(--text-muted)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.06em', display:'block', marginBottom:4 }
+  const inputStyle: React.CSSProperties = { width:'100%', padding:'6px 10px', background:'var(--bg-input)', border:'1px solid var(--border-input)', borderRadius:'var(--radius-input)', color:'var(--text-primary)', fontSize:'var(--fs-xs)', fontFamily:'inherit', boxSizing:'border-box' }
+  const labelStyle: React.CSSProperties = { fontSize:'var(--fs-2xs)', color:'var(--text-muted)', fontWeight:600, textTransform:'uppercase', letterSpacing:'var(--th-ls)', display:'block', marginBottom:4 }
   const field = (label: string, el: React.ReactNode) => (
     <div>
       <label style={labelStyle}>{label}</label>
@@ -289,7 +297,7 @@ function EditModal({ t, onClose, onSaved }: { t: Transaction; onClose: () => voi
   return (
     <div style={{ position:'fixed', inset:0, zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,0.6)' }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div style={{ background:'var(--bg-card)', borderRadius:16, border:'1px solid var(--border-subtle)', boxShadow:'0 24px 80px rgba(0,0,0,0.6)', width:'min(680px, 95vw)', maxHeight:'90vh', overflowY:'auto' }}>
+      <div style={{ background:'var(--bg-card)', borderRadius:'var(--card-radius)', border:'1px solid var(--border-subtle)', boxShadow:'var(--shadow-modal)', width:'min(680px, 95vw)', maxHeight:'90vh', overflowY:'auto' }}>
         {/* Header */}
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'18px 24px', borderBottom:'1px solid rgba(166,201,206,0.08)' }}>
           <div>
@@ -443,7 +451,7 @@ export function CashflowView({
           <div style={{ padding:'18px 24px', borderRight:'1px solid rgba(166,201,206,0.08)' }}>
             <div style={{ fontSize:'var(--fs-xs)', color:'var(--text-muted)', fontWeight:500, textTransform:'uppercase', letterSpacing:'0.06em' }}>Théorique (Due Date)</div>
             <div style={{ display:'flex', alignItems:'baseline', gap:6, marginTop:6 }}>
-              <span style={{ fontSize:26, fontWeight:800, color:'var(--text-primary)', fontFamily:'monospace' }}>{Math.round(cashflowData.theoriqueTotal).toLocaleString('fr-FR')}</span>
+              <span style={{ fontSize:'var(--fs-kpi)', fontWeight:'var(--fw-kpi)' as React.CSSProperties['fontWeight'], letterSpacing:'var(--ls-kpi)', lineHeight:1, color:'var(--text-primary)', fontFamily:'monospace' }}>{Math.round(cashflowData.theoriqueTotal).toLocaleString('fr-FR')}</span>
               <span style={{ fontSize:'var(--fs-xs)', color:'var(--text-muted)' }}>MUR</span>
             </div>
             <div style={{ fontSize:'var(--fs-2xs)', color:'var(--text-muted)', marginTop:4 }}>Facturé sur la période</div>
@@ -451,7 +459,7 @@ export function CashflowView({
           <div style={{ padding:'18px 24px', borderRight:'1px solid rgba(166,201,206,0.08)' }}>
             <div style={{ fontSize:'var(--fs-xs)', color:'var(--text-muted)', fontWeight:500, textTransform:'uppercase', letterSpacing:'0.06em' }}>Réel (Date Paid)</div>
             <div style={{ display:'flex', alignItems:'baseline', gap:6, marginTop:6 }}>
-              <span style={{ fontSize:26, fontWeight:800, color:'#22c55e', fontFamily:'monospace' }}>{Math.round(cashflowData.reelTotal).toLocaleString('fr-FR')}</span>
+              <span style={{ fontSize:'var(--fs-kpi)', fontWeight:'var(--fw-kpi)' as React.CSSProperties['fontWeight'], letterSpacing:'var(--ls-kpi)', lineHeight:1, color:'#22c55e', fontFamily:'monospace' }}>{Math.round(cashflowData.reelTotal).toLocaleString('fr-FR')}</span>
               <span style={{ fontSize:'var(--fs-xs)', color:'var(--text-muted)' }}>MUR</span>
             </div>
             <div style={{ fontSize:'var(--fs-2xs)', color:'var(--text-muted)', marginTop:4 }}>Encaissé effectivement</div>
@@ -459,7 +467,7 @@ export function CashflowView({
           <div style={{ padding:'18px 24px' }}>
             <div style={{ fontSize:'var(--fs-xs)', color:'var(--text-muted)', fontWeight:500, textTransform:'uppercase', letterSpacing:'0.06em' }}>Taux de recouvrement</div>
             <div style={{ display:'flex', alignItems:'baseline', gap:6, marginTop:6 }}>
-              <span style={{ fontSize:26, fontWeight:800, color:tauxColor, fontFamily:'monospace' }}>{taux.toFixed(1)}</span>
+              <span style={{ fontSize:'var(--fs-kpi)', fontWeight:'var(--fw-kpi)' as React.CSSProperties['fontWeight'], letterSpacing:'var(--ls-kpi)', lineHeight:1, color:tauxColor, fontFamily:'monospace' }}>{taux.toFixed(1)}</span>
               <span style={{ fontSize:'var(--fs-xs)', color:'var(--text-muted)' }}>%</span>
             </div>
             <div style={{ fontSize:'var(--fs-2xs)', color:'var(--text-muted)', marginTop:4 }}>

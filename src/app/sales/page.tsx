@@ -49,8 +49,16 @@ const BG_IMAGES = [
 
 function ChartCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 20 }}>
-      <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: sub ? 4 : 16 }}>{title}</div>
+    <div style={{
+      background: 'var(--card-bg)',
+      backdropFilter: 'var(--card-blur)',
+      WebkitBackdropFilter: 'var(--card-blur)',
+      border: 'var(--card-border)',
+      borderRadius: 'var(--card-radius)',
+      boxShadow: 'var(--card-shadow)',
+      padding: 'var(--card-padding)',
+    }}>
+      <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: sub ? 4 : 16, color: 'var(--text-primary)' }}>{title}</div>
       {sub && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 16 }}>{sub}</div>}
       {children}
     </div>
@@ -60,8 +68,15 @@ function ChartCard({ title, sub, children }: { title: string; sub?: string; chil
 function KpiStat({ value, label, color, icon: Icon }: { value: number; label: string; color: string; icon: React.ElementType }) {
   return (
     <div style={{ textAlign: 'center' }}>
-      <div style={{ fontSize: 22, fontWeight: 800, color, fontFamily: 'monospace' }}>{value}</div>
-      <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3 }}>
+      <div style={{
+        fontSize: 'var(--fs-kpi)',
+        fontWeight: 'var(--fw-kpi)' as React.CSSProperties['fontWeight'],
+        letterSpacing: 'var(--ls-kpi)',
+        lineHeight: 1,
+        color,
+        fontFamily: 'monospace',
+      }}>{value}</div>
+      <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3, marginTop: 4 }}>
         <Icon size={10} color={color} /> {label}
       </div>
     </div>
@@ -220,35 +235,36 @@ export default function SalesPage() {
         }
       />
 
-      {/* Tab bar */}
-      <div style={{ padding: '0 24px', background: 'var(--bg-card)', borderBottom: '1px solid var(--border-subtle)', display: 'flex', gap: 0, alignItems: 'center' }}>
-        {(['pipeline', 'forecast', 'clients', 'settings'] as Tab[]).map(t => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            style={{
-              padding: '12px 20px', fontSize: 'var(--fs-sm)', background: 'none', border: 'none', cursor: 'pointer',
-              fontWeight: tab === t ? 600 : 400,
-              color: tab === t ? 'var(--accent)' : 'var(--text-secondary)',
-              borderBottom: tab === t ? '2px solid var(--accent)' : '2px solid transparent',
-              transition: 'color 0.15s', fontFamily: 'inherit',
-              display: 'flex', alignItems: 'center', gap: 5,
-            }}
-          >
-            {t === 'settings' && <Settings size={13} />}
-            {{ pipeline: 'Pipeline', forecast: 'Prévisionnel', clients: 'Clients', settings: 'Réglages' }[t]}
-          </button>
-        ))}
+      <main style={{ maxWidth: 'var(--content-max)', margin: '0 auto', padding: 'var(--content-py) var(--content-px)', width: '100%' }}>
 
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingRight: 4 }}>
-          <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)} style={{ ...INPUT_STYLE }}>
+        {/* Tab bar */}
+        <div style={{ display: 'flex', gap: 'var(--tab-gap)', marginBottom: 20, borderBottom: '1px solid var(--border-subtle)', alignItems: 'center' }}>
+          {(['pipeline', 'forecast', 'clients', 'settings'] as Tab[]).map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              style={{
+                padding: 'var(--tab-py) var(--tab-px)',
+                fontSize: 'var(--tab-fs)',
+                fontWeight: 'var(--tab-fw)' as React.CSSProperties['fontWeight'],
+                background: 'none', border: 'none', cursor: 'pointer',
+                color: tab === t ? 'var(--tab-color-active)' : 'var(--tab-color)',
+                borderBottom: `var(--tab-indicator) solid ${tab === t ? 'var(--tab-color-active)' : 'transparent'}`,
+                marginBottom: -1,
+                transition: 'all 0.15s', fontFamily: 'inherit',
+                display: 'flex', alignItems: 'center', gap: 5,
+              }}
+            >
+              {t === 'settings' && <Settings size={13} />}
+              {{ pipeline: 'Pipeline', forecast: 'Prévisionnel', clients: 'Clients', settings: 'Réglages' }[t]}
+            </button>
+          ))}
+          <div style={{ flex: 1 }} />
+          <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)} style={{ ...INPUT_STYLE, marginBottom: 8 }}>
             <option value="">Tous les owners</option>
             {ownerOptions.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
         </div>
-      </div>
-
-      <div style={{ padding: 24 }}>
 
         {/* ── Tab Pipeline ─────────────────────────────────────────────────── */}
         {tab === 'pipeline' && (
@@ -270,10 +286,10 @@ export default function SalesPage() {
 
         {/* ── Tab Prévisionnel ─────────────────────────────────────────────── */}
         {tab === 'forecast' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--gap-grid)' }}>
 
             {/* KPIs */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 'var(--gap-grid)' }}>
               <KPICard
                 label="Pipeline total"
                 value={fmtCurrency(kpiPipelineTotal)}
@@ -299,7 +315,7 @@ export default function SalesPage() {
             </div>
 
             {/* Forecast + Funnel */}
-            <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 'var(--gap-grid)' }}>
               <ChartCard title="Prévisionnel" sub="Basé sur Expected Close Date">
                 <ForecastChart projects={localProjects} />
               </ChartCard>
@@ -309,7 +325,7 @@ export default function SalesPage() {
             </div>
 
             {/* Heatmap + Velocity */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--gap-grid)' }}>
               <ChartCard title="Deals stagnants" sub="Par étape × ancienneté">
                 <StaleHeatmap projects={localProjects} />
               </ChartCard>
@@ -319,7 +335,7 @@ export default function SalesPage() {
             </div>
 
             {/* Analytics row */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--gap-grid)' }}>
               <ChartCard title="Win/Loss par type">
                 <WinLossBySegment projects={localProjects} />
               </ChartCard>
@@ -328,7 +344,7 @@ export default function SalesPage() {
               </ChartCard>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--gap-grid)' }}>
               <ChartCard title="Priorité × Ancienneté" sub="Taille = montant · Couleur = health">
                 <ScatterRisk projects={localProjects} />
               </ChartCard>
@@ -404,7 +420,7 @@ export default function SalesPage() {
         {tab === 'settings' && (
           <SalesSettings projects={localProjects} clients={clients} />
         )}
-      </div>
+      </main>
 
       {/* Client detail panel */}
       {selectedClient && (
@@ -507,16 +523,24 @@ function SalesSettings({ projects, clients }: { projects: Project[]; clients: Cl
   }
   const countOk = Math.max(0, activeProjects.length + clients.length - counts.critical - counts.warning)
 
-  const cardStyle: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', overflow: 'hidden' }
+  const cardStyle: React.CSSProperties = {
+    background: 'var(--card-bg)',
+    backdropFilter: 'var(--card-blur)',
+    WebkitBackdropFilter: 'var(--card-blur)',
+    border: 'var(--card-border)',
+    borderRadius: 'var(--card-radius)',
+    boxShadow: 'var(--card-shadow)',
+    overflow: 'hidden',
+  }
   const segBtnStyle = (active: boolean): React.CSSProperties => ({
-    padding: '4px 12px', fontSize: 'var(--fs-xs)', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit',
+    padding: '4px 12px', fontSize: 'var(--fs-xs)', borderRadius: 'var(--radius-chip)', cursor: 'pointer', fontFamily: 'inherit',
     border: active ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
     background: active ? 'var(--accent-soft)' : 'transparent',
     color: active ? 'var(--accent)' : 'var(--text-muted)',
   })
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--gap-grid-lg)' }}>
 
       {/* Documentation des méthodes de calcul */}
       <div style={cardStyle}>

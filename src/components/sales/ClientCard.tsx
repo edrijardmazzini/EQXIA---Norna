@@ -40,10 +40,13 @@ export function ClientCard({ client, activeDealsCount, onClick }: ClientCardProp
       onClick={onClick}
       style={{
         width: '100%',
-        background: 'var(--bg-card)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: 'var(--radius-card)',
-        padding: '14px 16px',
+        background: 'var(--card-bg)',
+        backdropFilter: 'var(--card-blur)',
+        WebkitBackdropFilter: 'var(--card-blur)',
+        border: 'var(--card-border)',
+        borderRadius: 'var(--card-radius)',
+        boxShadow: 'var(--card-shadow)',
+        padding: 'var(--card-padding-sm)',
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
@@ -55,7 +58,7 @@ export function ClientCard({ client, activeDealsCount, onClick }: ClientCardProp
         if (onClick) (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border-accent)'
       }}
       onMouseLeave={e => {
-        if (onClick) (e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border-subtle)'
+        if (onClick) (e.currentTarget as HTMLDivElement).style.borderColor = ''
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>

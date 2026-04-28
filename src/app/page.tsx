@@ -1718,25 +1718,25 @@ export default function DashboardPage() {
           }
         />
 
-        <main style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 20px", width: "100%" }}>
+        <main style={{ maxWidth: "var(--content-max)", margin: "0 auto", padding: "var(--content-py) var(--content-px)", width: "100%" }}>
 
           {error && <div style={{ ...card, background: "var(--btn-danger-bg)", border: "1px solid rgba(248,113,113,0.3)", color: "var(--color-error)", fontSize: "var(--fs-sm)", marginBottom: 16 }}>Erreur: {error}</div>}
 
           {/* ── Tabs navigation ── */}
-          <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid var(--border-subtle)" }}>
+          <div style={{ display: "flex", gap: "var(--tab-gap)", marginBottom: 20, borderBottom: "1px solid var(--border-subtle)" }}>
             {([["dashboard", <><BarChart3 size={13} style={{ marginRight: 5, flexShrink: 0 }} />Dashboard</>], ["previsionnel", <><Telescope size={13} style={{ marginRight: 5, flexShrink: 0 }} />Prévisionnel</>], ["cashflow", <><Banknote size={13} style={{ marginRight: 5, flexShrink: 0 }} />Cashflow</>]] as [string, React.ReactNode][]).map(([key, label]) => (
               <button
                 key={key}
                 onClick={() => setActiveTab(key as any)}
                 style={{
-                  padding: "10px 20px",
-                  fontSize: "var(--fs-sm)",
-                  fontWeight: 600,
+                  padding: "var(--tab-py) var(--tab-px)",
+                  fontSize: "var(--tab-fs)",
+                  fontWeight: "var(--tab-fw)" as React.CSSProperties["fontWeight"],
                   fontFamily: "inherit",
                   cursor: "pointer",
                   border: "none",
-                  borderBottom: `2px solid ${activeTab === key ? "var(--accent)" : "transparent"}`,
-                  color: activeTab === key ? "var(--accent)" : "var(--text-secondary)",
+                  borderBottom: `var(--tab-indicator) solid ${activeTab === key ? "var(--tab-color-active)" : "transparent"}`,
+                  color: activeTab === key ? "var(--tab-color-active)" : "var(--tab-color)",
                   background: "none",
                   marginBottom: -1,
                   transition: "all 0.15s",
@@ -1795,10 +1795,10 @@ export default function DashboardPage() {
                   <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>{revKpiMode === "rev" ? "Revenu" : "CA"}</div>
                   <Seg value={revKpiMode} onChange={v => setRevKpiMode(v as any)} options={[["rev", "Revenu"], ["ca", "CA"]]} />
                 </div>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(166,201,206,0.15)", border: "1px solid rgba(166,201,206,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}><TrendingUp size={16} color="var(--accent)" /></div>
+                <div style={{ width: "var(--icon-box)", height: "var(--icon-box)", borderRadius: "var(--icon-box-radius)", background: "rgba(166,201,206,0.15)", border: "1px solid rgba(166,201,206,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}><TrendingUp size={16} color="var(--accent)" /></div>
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                <span style={{ fontSize: 28, fontWeight: 800, color: "var(--accent)", letterSpacing: "-0.03em", lineHeight: 1 }}>{Math.round(revKpiMode === "rev" ? revTotal : caTotal).toLocaleString("fr-FR")}</span>
+                <span style={{ fontSize: "var(--fs-kpi)", fontWeight: "var(--fw-kpi)" as React.CSSProperties["fontWeight"], color: "var(--accent)", letterSpacing: "var(--ls-kpi)", lineHeight: 1 }}>{Math.round(revKpiMode === "rev" ? revTotal : caTotal).toLocaleString("fr-FR")}</span>
                 <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>MUR</span>
               </div>
               <div style={{ marginTop: "auto", paddingTop: 8 }}>
@@ -1813,10 +1813,10 @@ export default function DashboardPage() {
             <div style={{ ...card, display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>Average Margin</div>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(166,201,206,0.15)", border: "1px solid rgba(166,201,206,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}><Percent size={16} color="var(--accent)" /></div>
+                <div style={{ width: "var(--icon-box)", height: "var(--icon-box)", borderRadius: "var(--icon-box-radius)", background: "rgba(166,201,206,0.15)", border: "1px solid rgba(166,201,206,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}><Percent size={16} color="var(--accent)" /></div>
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                <span style={{ fontSize: 28, fontWeight: 800, color: avgMarginWithSalaries >= 0 ? "var(--accent)" : "var(--color-error)", letterSpacing: "-0.03em", lineHeight: 1 }}>{avgMarginWithSalaries.toFixed(1)}</span>
+                <span style={{ fontSize: "var(--fs-kpi)", fontWeight: "var(--fw-kpi)" as React.CSSProperties["fontWeight"], color: avgMarginWithSalaries >= 0 ? "var(--accent)" : "var(--color-error)", letterSpacing: "var(--ls-kpi)", lineHeight: 1 }}>{avgMarginWithSalaries.toFixed(1)}</span>
                 <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>%</span>
               </div>
               <div style={{ marginTop: "auto", paddingTop: 8 }}>
@@ -1831,10 +1831,10 @@ export default function DashboardPage() {
             <div style={{ ...card, display: "flex", flexDirection: "column" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
                 <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>Charges (Dépenses &amp; Salaires)</div>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}><Wallet size={16} color="#ef4444" /></div>
+                <div style={{ width: "var(--icon-box)", height: "var(--icon-box)", borderRadius: "var(--icon-box-radius)", background: "rgba(239,68,68,0.15)", border: "1px solid rgba(239,68,68,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}><Wallet size={16} color="#ef4444" /></div>
               </div>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                <span style={{ fontSize: 28, fontWeight: 800, color: "var(--text-primary)", letterSpacing: "-0.03em", lineHeight: 1 }}>{Math.round(chargesTotal).toLocaleString("fr-FR")}</span>
+                <span style={{ fontSize: "var(--fs-kpi)", fontWeight: "var(--fw-kpi)" as React.CSSProperties["fontWeight"], color: "var(--text-primary)", letterSpacing: "var(--ls-kpi)", lineHeight: 1 }}>{Math.round(chargesTotal).toLocaleString("fr-FR")}</span>
                 <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>MUR</span>
               </div>
               <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontFamily: "monospace", marginTop: 6 }}>
@@ -3227,9 +3227,17 @@ export default function DashboardPage() {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-const card: React.CSSProperties = { background: "var(--bg-panel)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", border: "1px solid rgba(166,201,206,0.10)", borderRadius: 14, padding: "20px" }
-const thStyle: React.CSSProperties = { textAlign: "left", padding: "10px 16px", color: "var(--text-muted)", fontWeight: 500, fontSize: "var(--fs-2xs)", textTransform: "uppercase", letterSpacing: "0.05em" }
-const tdStyle: React.CSSProperties = { padding: "10px 16px", color: "var(--text-primary)" }
+const card: React.CSSProperties = {
+  background: "var(--card-bg)",
+  backdropFilter: "var(--card-blur)",
+  WebkitBackdropFilter: "var(--card-blur)",
+  border: "var(--card-border)",
+  borderRadius: "var(--card-radius)",
+  boxShadow: "var(--card-shadow)",
+  padding: "var(--card-padding)",
+}
+const thStyle: React.CSSProperties = { textAlign: "left", padding: "var(--th-py) var(--th-px)", color: "var(--th-color)", fontWeight: "var(--th-fw)" as React.CSSProperties["fontWeight"], fontSize: "var(--th-fs)", textTransform: "uppercase", letterSpacing: "var(--th-ls)" }
+const tdStyle: React.CSSProperties = { padding: "var(--th-py) var(--th-px)", color: "var(--text-primary)" }
 const filterCellStyle: React.CSSProperties = { padding: "4px 8px" }
 const filterInputStyle: React.CSSProperties = {
   width: "100%", padding: "4px 8px", fontSize: "var(--fs-2xs)",
@@ -3665,10 +3673,10 @@ function KpiCard({ icon, iconBg, iconBorder, label, value, unit, sub, valueColor
     <div style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
         <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>{label}</div>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: iconBg, border: `1px solid ${iconBorder}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{icon}</div>
+        <div style={{ width: "var(--icon-box)", height: "var(--icon-box)", borderRadius: "var(--icon-box-radius)", background: iconBg, border: `1px solid ${iconBorder}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{icon}</div>
       </div>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <span style={{ fontSize: 28, fontWeight: 800, color: valueColor || "var(--text-primary)", letterSpacing: "-0.03em", lineHeight: 1 }}>{value}</span>
+        <span style={{ fontSize: "var(--fs-kpi)", fontWeight: "var(--fw-kpi)" as React.CSSProperties["fontWeight"], color: valueColor || "var(--text-primary)", letterSpacing: "var(--ls-kpi)", lineHeight: 1 }}>{value}</span>
         {unit && <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500 }}>{unit}</span>}
       </div>
       {sub && <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 8 }}>{sub}</div>}
