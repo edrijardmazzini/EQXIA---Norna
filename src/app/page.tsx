@@ -61,6 +61,25 @@ interface Depense {
   recurrence?: string
 }
 
+interface Transaction {
+  id: string
+  transactionNumber: string
+  type: string        // 'Quote' | 'Invoice' | 'Credit Note'
+  status: string      // 'Draft' | 'Sent' | 'Accepted' | 'Paid' | 'Partial' | 'Overdue' | 'Written Off' | 'Cancelled' | ...
+  amount: number
+  currency: string
+  dateIssued: string  // YYYY-MM-DD
+  dateAccepted: string
+  dueDate: string     // formule Notion : Date Accepted + Delay of Payment
+  datePaid: string    // YYYY-MM-DD vide si non payé
+  delayDays: number
+  description: string
+  projectId: string
+  clientId: string
+  paymentMethod: string
+  notes: string
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const MONTHS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"]
@@ -404,6 +423,7 @@ export default function DashboardPage() {
   const router = useRouter()
   const [projects, setProjects] = useState<Project[]>([])
   const [depenses, setDepenses] = useState<Depense[]>([])
+  const [transactions, setTransactions] = useState<Transaction[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
@@ -497,6 +517,9 @@ export default function DashboardPage() {
       if (data.error) throw new Error(data.error)
       setProjects(data.projects || []); setDepenses(data.depenses || []); setEmployees(data.employees || []); setClients(data.clients || [])
     }).catch(e => setError(e.message)).finally(() => setLoading(false))
+    fetch("/api/transactions").then(r => r.json()).then(data => {
+      if (!data.error) setTransactions(data.transactions || [])
+    }).catch(() => {})
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -1455,68 +1478,98 @@ export default function DashboardPage() {
     return { caTotal, revenuNet, commissionsTotal, beneficiaires, depAll: depTotalRange, salAll: salTotalRange, chargesAll: chargesRange, margeBrute, ebitda, margeEbitdaPct, margeNettePct, rangeInfo }
   }, [projects, depenses, salaireMensuel, recurringCriticalMensuel, currentDossier, cashViewMode, cashViewPast, cashViewFuture, cashViewCustomStart, cashViewCustomEnd, buildMonthCodes])
 
-  // CASHFLOW — projets signés/livrés uniquement (Won, Won orally, Completed), date = endDate explicite
-  // À terme : basé sur Date de Facturation quand disponible
+  // CASHFLOW — basé sur la DB Transactions (💸) Notion
+  // Théorique = amount à la Due Date · Réel = amount à la Date Paid (0 si non payé)
   const cashflowData = useMemo(() => {
-    const CASHFLOW_STATUSES = ["Won", "Won orally", "Completed"]
+    // Seules les factures (Invoice), hors Cancelled/Rejected
+    const invoices = transactions.filter(t =>
+      t.type === "Invoice" && !["Cancelled", "Rejected"].includes(t.status)
+    )
 
-    // Construire les mois existants basés sur endDate explicitement
+    // Plage basée sur les Due Dates des factures
     const existingMonths = [...new Set(
-      projects
-        .filter(p => CASHFLOW_STATUSES.includes(p.status) && p.endDate)
-        .map(p => {
-          const d = new Date(p.endDate!)
-          return isNaN(d.getTime()) ? "" : dossierCode(d.getFullYear(), d.getMonth() + 1)
-        })
+      invoices
+        .map(t => t.dueDate || t.dateIssued)
+        .filter(Boolean)
+        .map(iso => { const d = new Date(iso); return isNaN(d.getTime()) ? "" : dossierCode(d.getFullYear(), d.getMonth() + 1) })
         .filter(Boolean)
     )]
     const codes = buildMonthCodes(cfViewMode, cfViewPast, cfViewFuture, cfViewCustomStart, cfViewCustomEnd, existingMonths)
     const codeSet = new Set(codes)
 
-    const wonProjects = projects.filter(p => {
-      if (!CASHFLOW_STATUSES.includes(p.status)) return false
-      if (!p.endDate) return false
-      const d = new Date(p.endDate)
-      if (isNaN(d.getTime())) return false
-      const code = dossierCode(d.getFullYear(), d.getMonth() + 1)
-      return codeSet.has(code)
-    })
+    const byDueMonth: Record<string, { theorique: number; reel: number; invoices: Transaction[] }> = {}
+    let theoriqueTotal = 0
+    let reelTotal = 0
+    // Pour le taux : sur les factures dont la due date est dans la plage
+    let theoriqueInRange = 0
+    let reelInRange = 0
 
-    let caTotal = 0
-    let commissionsTotal = 0
-    let revenuNet = 0
-    const byMonth: Record<string, { ca: number; net: number }> = {}
+    for (const t of invoices) {
+      const dueDateISO = t.dueDate || t.dateIssued
+      if (!dueDateISO) continue
+      const dueD = new Date(dueDateISO)
+      if (isNaN(dueD.getTime())) continue
+      const dueCode = dossierCode(dueD.getFullYear(), dueD.getMonth() + 1)
 
-    for (const p of wonProjects) {
-      const rev = computeProjectRevenue(p)
-      if (!rev || !rev.caMUR) continue
-      caTotal += rev.caMUR
-      commissionsTotal += rev.commissionMUR
-      revenuNet += rev.netMUR
+      const amtMUR = toMUR(t.amount, t.currency, dueDateISO)
+      if (amtMUR <= 0) continue
 
-      const d = new Date(p.endDate!)
-      const code = dossierCode(d.getFullYear(), d.getMonth() + 1)
-      if (!byMonth[code]) byMonth[code] = { ca: 0, net: 0 }
-      byMonth[code].ca += rev.caMUR
-      byMonth[code].net += rev.netMUR
+      // Théorique : place dans le mois de Due Date si dans la plage
+      if (codeSet.has(dueCode)) {
+        theoriqueInRange += amtMUR
+        if (!byDueMonth[dueCode]) byDueMonth[dueCode] = { theorique: 0, reel: 0, invoices: [] }
+        byDueMonth[dueCode].theorique += amtMUR
+        byDueMonth[dueCode].invoices.push(t)
+        // Réel pour ce même mois : est-ce que la facture a été payée ?
+        if (t.datePaid) {
+          const reelMUR = toMUR(t.amount, t.currency, t.datePaid)
+          byDueMonth[dueCode].reel += reelMUR
+          reelInRange += reelMUR
+        }
+      }
+
+      // Totaux globaux (toutes dates confondues) pour KPIs
+      theoriqueTotal += amtMUR
+      if (t.datePaid) reelTotal += toMUR(t.amount, t.currency, t.datePaid)
     }
 
     const months = codes.map(code => ({
       code,
       label: `${MONTHS[parseInt(code.slice(2), 10) - 1]} 20${code.slice(0, 2)}`,
-      ca: byMonth[code]?.ca ?? 0,
-      net: byMonth[code]?.net ?? 0,
+      theorique: byDueMonth[code]?.theorique ?? 0,
+      reel: byDueMonth[code]?.reel ?? 0,
+      invoices: byDueMonth[code]?.invoices ?? [],
       isFuture: code > currentDossier,
     }))
 
-    const margeNettePct = caTotal > 0 ? (revenuNet / caTotal) * 100 : 0
+    const tauxRecouvrement = theoriqueInRange > 0 ? (reelInRange / theoriqueInRange) * 100 : 0
+
+    // Statut breakdown
+    const nbOverdue = invoices.filter(t => {
+      if (t.status === "Overdue") return true
+      if (t.datePaid) return false
+      const due = t.dueDate || t.dateIssued
+      if (!due) return false
+      return due < new Date().toISOString().slice(0, 10)
+    }).length
+    const nbPending = invoices.filter(t => !t.datePaid && !["Overdue", "Written Off"].includes(t.status) && (t.dueDate || t.dateIssued) >= new Date().toISOString().slice(0, 10)).length
+
     const rangeInfo = {
       nbPast: codes.filter(c => c <= currentDossier).length,
       nbFuture: codes.filter(c => c > currentDossier).length,
     }
 
-    return { caTotal, commissionsTotal, revenuNet, margeNettePct, months, rangeInfo, nbProjects: wonProjects.length }
-  }, [projects, cfViewMode, cfViewPast, cfViewFuture, cfViewCustomStart, cfViewCustomEnd, buildMonthCodes, currentDossier])
+    return {
+      theoriqueTotal: theoriqueInRange,
+      reelTotal: reelInRange,
+      tauxRecouvrement,
+      months,
+      rangeInfo,
+      nbInvoices: invoices.length,
+      nbOverdue,
+      nbPending,
+    }
+  }, [transactions, cfViewMode, cfViewPast, cfViewFuture, cfViewCustomStart, cfViewCustomEnd, buildMonthCodes, currentDossier])
 
   // Mois disponibles (décroissant) pour le filtre Date des Dernières ventes — format "YYYY-MM"
   // Basé sur End Date (= mois du revenu)
@@ -2566,7 +2619,7 @@ export default function DashboardPage() {
           <div style={{ ...card, marginTop: 24, padding: 0, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)", flexWrap: "wrap", gap: 12 }}>
               <div>
-                <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>💵 Cash &amp; PNL</div>
+                <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>💵 Cash &amp; PNL <span style={{ fontSize: "var(--fs-xs)", fontWeight: 400, color: "var(--text-muted)", marginLeft: 4 }}>(théorique)</span></div>
                 <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>
                   CA → Revenu net → Marge brute → EBITDA
                   {cashData.rangeInfo.nbFuture > 0 && cashData.rangeInfo.nbPast > 0 && ` · ${cashData.rangeInfo.nbPast} passé${cashData.rangeInfo.nbPast > 1 ? "s" : ""} + ${cashData.rangeInfo.nbFuture} projeté${cashData.rangeInfo.nbFuture > 1 ? "s" : ""}`}
@@ -2697,17 +2750,20 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* ── Cashflow (Won only, endDate) ── */}
+          {/* ── Cashflow (DB Transactions) ── */}
           <div style={{ ...card, marginTop: 24, padding: 0, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)", flexWrap: "wrap", gap: 12 }}>
               <div>
-                <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>💰 Cashflow</div>
+                <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>
+                  💰 Cashflow
+                  <span style={{ fontSize: "var(--fs-xs)", fontWeight: 400, color: "var(--text-muted)", marginLeft: 8 }}>Factures · Due Date (théorique) vs Date Paid (réel)</span>
+                </div>
                 <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>
-                  Won uniquement · basé sur End Date
-                  {cashflowData.rangeInfo.nbFuture > 0 && cashflowData.rangeInfo.nbPast > 0 && ` · ${cashflowData.rangeInfo.nbPast} passé${cashflowData.rangeInfo.nbPast > 1 ? "s" : ""} + ${cashflowData.rangeInfo.nbFuture} projeté${cashflowData.rangeInfo.nbFuture > 1 ? "s" : ""}`}
-                  {cashflowData.rangeInfo.nbFuture > 0 && cashflowData.rangeInfo.nbPast === 0 && ` · ${cashflowData.rangeInfo.nbFuture} mois projetés`}
-                  {cashflowData.rangeInfo.nbFuture === 0 && ` · ${cashflowData.rangeInfo.nbPast} mois`}
-                  <span style={{ marginLeft: 8, fontSize: "var(--fs-2xs)", color: "rgba(166,201,206,0.4)", fontStyle: "italic" }}>À terme : Date de Facturation</span>
+                  {cashflowData.nbInvoices} facture(s)
+                  {cashflowData.nbOverdue > 0 && <span style={{ color: "#ef4444", marginLeft: 8 }}>· {cashflowData.nbOverdue} en retard</span>}
+                  {cashflowData.nbPending > 0 && <span style={{ color: "#facc15", marginLeft: 8 }}>· {cashflowData.nbPending} en attente</span>}
+                  {cashflowData.rangeInfo.nbFuture > 0 && cashflowData.rangeInfo.nbPast > 0 && <span style={{ marginLeft: 8 }}>· {cashflowData.rangeInfo.nbPast} mois passés + {cashflowData.rangeInfo.nbFuture} projetés</span>}
+                  {cashflowData.rangeInfo.nbFuture === 0 && cashflowData.rangeInfo.nbPast > 0 && <span style={{ marginLeft: 8 }}>· {cashflowData.rangeInfo.nbPast} mois</span>}
                 </div>
               </div>
               <ViewRangeToggle
@@ -2723,81 +2779,103 @@ export default function DashboardPage() {
             {/* KPIs */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0, borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
               <div style={{ padding: "18px 24px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>CA encaissé / à encaisser</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>Théorique (Due Date)</div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
-                  <span style={{ fontSize: 26, fontWeight: 800, color: "var(--text-primary)", fontFamily: "monospace" }}>{Math.round(cashflowData.caTotal).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: "var(--text-primary)", fontFamily: "monospace" }}>{Math.round(cashflowData.theoriqueTotal).toLocaleString("fr-FR")}</span>
                   <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
                 </div>
-                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>{cashflowData.nbProjects} projet(s) Won</div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>Montant total facturé sur la période</div>
               </div>
               <div style={{ padding: "18px 24px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>− Commissions</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>Réel (Date Paid)</div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
-                  <span style={{ fontSize: 26, fontWeight: 800, color: "#f97316", fontFamily: "monospace" }}>−{Math.round(cashflowData.commissionsTotal).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: "#22c55e", fontFamily: "monospace" }}>{Math.round(cashflowData.reelTotal).toLocaleString("fr-FR")}</span>
                   <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
                 </div>
-                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
-                  {cashflowData.caTotal > 0 ? ((cashflowData.commissionsTotal / cashflowData.caTotal) * 100).toFixed(1) : "0"} % du CA
-                </div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>Montant effectivement encaissé</div>
               </div>
               <div style={{ padding: "18px 24px" }}>
-                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>= Revenu net</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>Taux de recouvrement</div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
-                  <span style={{ fontSize: 26, fontWeight: 800, color: "var(--accent)", fontFamily: "monospace" }}>{Math.round(cashflowData.revenuNet).toLocaleString("fr-FR")}</span>
-                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: cashflowData.tauxRecouvrement >= 80 ? "#22c55e" : cashflowData.tauxRecouvrement >= 50 ? "#facc15" : "#ef4444", fontFamily: "monospace" }}>
+                    {cashflowData.tauxRecouvrement.toFixed(1)}
+                  </span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>%</span>
                 </div>
-                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
-                  {cashflowData.margeNettePct.toFixed(1)} % du CA · net de commissions
-                </div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>Réel ÷ Théorique · {cashflowData.theoriqueTotal > 0 ? Math.round(cashflowData.theoriqueTotal - cashflowData.reelTotal).toLocaleString("fr-FR") : "0"} MUR restants</div>
               </div>
             </div>
 
-            {/* Histogramme mensuel */}
-            {cashflowData.months.length > 0 ? (
+            {/* Histogramme mensuel théorique vs réel */}
+            {cashflowData.months.some(m => m.theorique > 0 || m.reel > 0) ? (
               <div style={{ padding: "16px 24px" }}>
-                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>Répartition mensuelle (CA net)</div>
-                <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 80 }}>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 12 }}>
+                  Répartition mensuelle
+                </div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 90 }}>
                   {(() => {
-                    const maxVal = Math.max(...cashflowData.months.map(m => m.ca), 1)
+                    const maxVal = Math.max(...cashflowData.months.map(m => m.theorique), 1)
                     return cashflowData.months.map(m => (
-                      <div key={m.code} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
-                        <div style={{ color: "var(--text-muted)", fontFamily: "monospace", fontSize: 9 }}>
-                          {m.ca > 0 ? Math.round(m.ca / 1000) + "k" : ""}
+                      <div key={m.code} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0 }}>
+                        <div style={{ color: "var(--text-muted)", fontFamily: "monospace", fontSize: 8, marginBottom: 2 }}>
+                          {m.theorique > 0 ? Math.round(m.theorique / 1000) + "k" : ""}
                         </div>
-                        <div
-                          title={`${m.label} · ${Math.round(m.ca).toLocaleString("fr-FR")} MUR CA · ${Math.round(m.net).toLocaleString("fr-FR")} MUR net`}
-                          style={{
-                            width: "100%",
-                            height: m.ca > 0 ? Math.max(4, Math.round((m.ca / maxVal) * 56)) : 2,
-                            borderRadius: 3,
-                            background: m.isFuture
-                              ? "rgba(166,201,206,0.25)"
-                              : "linear-gradient(180deg, #A6C9CE 0%, #6ba8ae 100%)",
-                            border: m.isFuture ? "1px dashed rgba(166,201,206,0.4)" : "none",
-                            transition: "height 0.3s ease",
-                          }}
-                        />
-                        <div style={{ fontSize: 9, color: "var(--text-muted)", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", maxWidth: "100%" }}>
+                        {/* Double barre : théorique derrière, réel devant */}
+                        <div style={{ width: "100%", position: "relative", height: Math.max(4, Math.round((m.theorique / maxVal) * 62)) }}>
+                          {/* Barre théorique (fond, outline) */}
+                          <div
+                            title={`${m.label} · Théorique : ${Math.round(m.theorique).toLocaleString("fr-FR")} MUR`}
+                            style={{
+                              position: "absolute", bottom: 0, left: 0, right: 0,
+                              height: "100%",
+                              borderRadius: 3,
+                              background: m.isFuture ? "rgba(166,201,206,0.10)" : "rgba(166,201,206,0.18)",
+                              border: `1px ${m.isFuture ? "dashed" : "solid"} rgba(166,201,206,0.35)`,
+                            }}
+                          />
+                          {/* Barre réel (avant, pleine) */}
+                          {m.reel > 0 && (
+                            <div
+                              title={`${m.label} · Réel : ${Math.round(m.reel).toLocaleString("fr-FR")} MUR`}
+                              style={{
+                                position: "absolute", bottom: 0, left: 0, right: 0,
+                                height: `${Math.round((m.reel / m.theorique) * 100)}%`,
+                                borderRadius: 3,
+                                background: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)",
+                                minHeight: 3,
+                              }}
+                            />
+                          )}
+                        </div>
+                        <div style={{ fontSize: 8, color: "var(--text-muted)", textAlign: "center", overflow: "hidden", maxWidth: "100%", whiteSpace: "nowrap" }}>
                           {m.label.slice(0, 3)}
                         </div>
                       </div>
                     ))
                   })()}
                 </div>
-                <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>
+                <div style={{ display: "flex", gap: 16, marginTop: 10, fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: "linear-gradient(180deg, #A6C9CE 0%, #6ba8ae 100%)", display: "inline-block" }} />
-                    Passé
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: "rgba(166,201,206,0.18)", border: "1px solid rgba(166,201,206,0.35)", display: "inline-block" }} />
+                    Théorique (Due Date)
                   </span>
                   <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ width: 10, height: 10, borderRadius: 2, background: "rgba(166,201,206,0.25)", border: "1px dashed rgba(166,201,206,0.4)", display: "inline-block" }} />
-                    Projeté (End Date)
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: "linear-gradient(180deg, #22c55e 0%, #16a34a 100%)", display: "inline-block" }} />
+                    Réel (Date Paid)
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: "rgba(166,201,206,0.10)", border: "1px dashed rgba(166,201,206,0.35)", display: "inline-block" }} />
+                    Futur
                   </span>
                 </div>
               </div>
+            ) : transactions.length === 0 ? (
+              <div style={{ padding: "16px 24px", fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontStyle: "italic" }}>
+                Chargement des transactions… ou aucune facture trouvée dans la DB Notion.
+              </div>
             ) : (
               <div style={{ padding: "16px 24px", fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontStyle: "italic" }}>
-                Aucun projet Won avec End Date sur la période sélectionnée.
+                Aucune facture sur la période sélectionnée.
               </div>
             )}
           </div>
