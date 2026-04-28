@@ -451,6 +451,11 @@ export default function DashboardPage() {
   const [cashViewFuture, setCashViewFuture] = useState<"12m" | "6m" | "3m">("3m")
   const [cashViewCustomStart, setCashViewCustomStart] = useState<string>("")
   const [cashViewCustomEnd, setCashViewCustomEnd] = useState<string>("")
+  const [cfViewMode, setCfViewMode] = useState<"past" | "future" | "custom">("past")
+  const [cfViewPast, setCfViewPast] = useState<"all" | "12m" | "6m" | "3m">("all")
+  const [cfViewFuture, setCfViewFuture] = useState<"12m" | "6m" | "3m">("3m")
+  const [cfViewCustomStart, setCfViewCustomStart] = useState<string>("")
+  const [cfViewCustomEnd, setCfViewCustomEnd] = useState<string>("")
   const [topMode, setTopMode] = useState<"clients" | "fournisseurs">("clients")
   const [tableMode, setTableMode] = useState<"ventes" | "depenses">("ventes")
 
@@ -1377,15 +1382,11 @@ export default function DashboardPage() {
   // EBITDA = Revenu net − Charges (dépenses + salaires opérationnels)
   // Marge EBITDA % = EBITDA / CA × 100
   const cashData = useMemo(() => {
-    // Construire la plage de mois selon cashView*
+    // Construire la plage de mois selon cashView* — même logique que heroData (tous non-Lost/Cancelled)
     const existingMonths = [
       ...new Set([
         ...depenses.map(d => d.dossier).filter(Boolean),
-        ...projects.map(p => {
-          const iso = getRevenueDateISO(p); if (!iso) return ""
-          const d = new Date(iso)
-          return `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
-        }).filter(Boolean),
+        ...projects.map(p => getProjectDossier(p)).filter(Boolean),
       ]),
     ]
     const codes = buildMonthCodes(cashViewMode, cashViewPast, cashViewFuture, cashViewCustomStart, cashViewCustomEnd, existingMonths)
@@ -1393,11 +1394,8 @@ export default function DashboardPage() {
     const inRange = (code: string) => codeSet.has(code)
 
     const wonProjects = projects.filter(p => {
-      if (!["Won", "Active", "Completed", "Won orally"].includes(p.status)) return false
-      const iso = getRevenueDateISO(p); if (!iso) return false
-      const d = new Date(iso)
-      const code = `${String(d.getFullYear()).slice(2)}${String(d.getMonth() + 1).padStart(2, "0")}`
-      return inRange(code)
+      const rev = computeProjectRevenue(p)
+      return rev !== null && inRange(rev.dossier)
     })
     let caTotal = 0
     let revenuNet = 0
@@ -1405,24 +1403,23 @@ export default function DashboardPage() {
     const byBeneficiaire: Record<string, { total: number; percent: number; projectCount: number; projects: { name: string; amount: number; pct: number }[] }> = {}
 
     for (const p of wonProjects) {
-      const caMUR = getCAMUR(p)
-      if (!caMUR) continue
-      caTotal += caMUR
+      const rev = computeProjectRevenue(p)
+      if (!rev || !rev.caMUR) continue
+      caTotal += rev.caMUR
 
       const beneficiaire = (p.commissionTo || "").trim()
       const normalizedPct = getCommissionRate(p)
 
-      if (beneficiaire && normalizedPct > 0 && p.finalAmount > 0) {
-        const commissionMUR = toMUR(p.finalAmount * normalizedPct, p.currency)
-        commissionsTotal += commissionMUR
-        revenuNet += caMUR - commissionMUR
+      if (beneficiaire && normalizedPct > 0 && rev.commissionMUR > 0) {
+        commissionsTotal += rev.commissionMUR
+        revenuNet += rev.netMUR
         const percentLabel = normalizedPct * 100
         if (!byBeneficiaire[beneficiaire]) byBeneficiaire[beneficiaire] = { total: 0, percent: percentLabel, projectCount: 0, projects: [] }
-        byBeneficiaire[beneficiaire].total += commissionMUR
+        byBeneficiaire[beneficiaire].total += rev.commissionMUR
         byBeneficiaire[beneficiaire].projectCount += 1
-        byBeneficiaire[beneficiaire].projects.push({ name: p.name, amount: commissionMUR, pct: percentLabel })
+        byBeneficiaire[beneficiaire].projects.push({ name: p.name, amount: rev.commissionMUR, pct: percentLabel })
       } else {
-        revenuNet += caMUR
+        revenuNet += rev.caMUR
       }
     }
     const beneficiaires = Object.entries(byBeneficiaire)
@@ -1457,6 +1454,69 @@ export default function DashboardPage() {
 
     return { caTotal, revenuNet, commissionsTotal, beneficiaires, depAll: depTotalRange, salAll: salTotalRange, chargesAll: chargesRange, margeBrute, ebitda, margeEbitdaPct, margeNettePct, rangeInfo }
   }, [projects, depenses, salaireMensuel, recurringCriticalMensuel, currentDossier, cashViewMode, cashViewPast, cashViewFuture, cashViewCustomStart, cashViewCustomEnd, buildMonthCodes])
+
+  // CASHFLOW — projets signés/livrés uniquement (Won, Won orally, Completed), date = endDate explicite
+  // À terme : basé sur Date de Facturation quand disponible
+  const cashflowData = useMemo(() => {
+    const CASHFLOW_STATUSES = ["Won", "Won orally", "Completed"]
+
+    // Construire les mois existants basés sur endDate explicitement
+    const existingMonths = [...new Set(
+      projects
+        .filter(p => CASHFLOW_STATUSES.includes(p.status) && p.endDate)
+        .map(p => {
+          const d = new Date(p.endDate!)
+          return isNaN(d.getTime()) ? "" : dossierCode(d.getFullYear(), d.getMonth() + 1)
+        })
+        .filter(Boolean)
+    )]
+    const codes = buildMonthCodes(cfViewMode, cfViewPast, cfViewFuture, cfViewCustomStart, cfViewCustomEnd, existingMonths)
+    const codeSet = new Set(codes)
+
+    const wonProjects = projects.filter(p => {
+      if (!CASHFLOW_STATUSES.includes(p.status)) return false
+      if (!p.endDate) return false
+      const d = new Date(p.endDate)
+      if (isNaN(d.getTime())) return false
+      const code = dossierCode(d.getFullYear(), d.getMonth() + 1)
+      return codeSet.has(code)
+    })
+
+    let caTotal = 0
+    let commissionsTotal = 0
+    let revenuNet = 0
+    const byMonth: Record<string, { ca: number; net: number }> = {}
+
+    for (const p of wonProjects) {
+      const rev = computeProjectRevenue(p)
+      if (!rev || !rev.caMUR) continue
+      caTotal += rev.caMUR
+      commissionsTotal += rev.commissionMUR
+      revenuNet += rev.netMUR
+
+      const d = new Date(p.endDate!)
+      const code = dossierCode(d.getFullYear(), d.getMonth() + 1)
+      if (!byMonth[code]) byMonth[code] = { ca: 0, net: 0 }
+      byMonth[code].ca += rev.caMUR
+      byMonth[code].net += rev.netMUR
+    }
+
+    const months = codes.map(code => ({
+      code,
+      label: `${MONTHS[parseInt(code.slice(2), 10) - 1]} 20${code.slice(0, 2)}`,
+      ca: byMonth[code]?.ca ?? 0,
+      net: byMonth[code]?.net ?? 0,
+      isFuture: code > currentDossier,
+    }))
+
+    const margeNettePct = caTotal > 0 ? (revenuNet / caTotal) * 100 : 0
+    const rangeInfo = {
+      nbPast: codes.filter(c => c <= currentDossier).length,
+      nbFuture: codes.filter(c => c > currentDossier).length,
+    }
+
+    return { caTotal, commissionsTotal, revenuNet, margeNettePct, months, rangeInfo, nbProjects: wonProjects.length }
+  }, [projects, cfViewMode, cfViewPast, cfViewFuture, cfViewCustomStart, cfViewCustomEnd, buildMonthCodes, currentDossier])
 
   // Mois disponibles (décroissant) pour le filtre Date des Dernières ventes — format "YYYY-MM"
   // Basé sur End Date (= mois du revenu)
@@ -2633,6 +2693,111 @@ export default function DashboardPage() {
             ) : (
               <div style={{ padding: "16px 24px", fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontStyle: "italic", borderTop: "1px solid rgba(166,201,206,0.08)" }}>
                 Aucune commission enregistrée sur les projets. Les champs `Commission %` et `Commissionnaire` de la DB Projects sont lus automatiquement s'ils existent.
+              </div>
+            )}
+          </div>
+
+          {/* ── Cashflow (Won only, endDate) ── */}
+          <div style={{ ...card, marginTop: 24, padding: 0, overflow: "hidden" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)", flexWrap: "wrap", gap: 12 }}>
+              <div>
+                <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>💰 Cashflow</div>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", marginTop: 2 }}>
+                  Won uniquement · basé sur End Date
+                  {cashflowData.rangeInfo.nbFuture > 0 && cashflowData.rangeInfo.nbPast > 0 && ` · ${cashflowData.rangeInfo.nbPast} passé${cashflowData.rangeInfo.nbPast > 1 ? "s" : ""} + ${cashflowData.rangeInfo.nbFuture} projeté${cashflowData.rangeInfo.nbFuture > 1 ? "s" : ""}`}
+                  {cashflowData.rangeInfo.nbFuture > 0 && cashflowData.rangeInfo.nbPast === 0 && ` · ${cashflowData.rangeInfo.nbFuture} mois projetés`}
+                  {cashflowData.rangeInfo.nbFuture === 0 && ` · ${cashflowData.rangeInfo.nbPast} mois`}
+                  <span style={{ marginLeft: 8, fontSize: "var(--fs-2xs)", color: "rgba(166,201,206,0.4)", fontStyle: "italic" }}>À terme : Date de Facturation</span>
+                </div>
+              </div>
+              <ViewRangeToggle
+                mode={cfViewMode} setMode={setCfViewMode}
+                past={cfViewPast} setPast={setCfViewPast}
+                future={cfViewFuture} setFuture={setCfViewFuture}
+                customStart={cfViewCustomStart} setCustomStart={setCfViewCustomStart}
+                customEnd={cfViewCustomEnd} setCustomEnd={setCfViewCustomEnd}
+                fyLabel={fy.label}
+              />
+            </div>
+
+            {/* KPIs */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 0, borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
+              <div style={{ padding: "18px 24px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>CA encaissé / à encaisser</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: "var(--text-primary)", fontFamily: "monospace" }}>{Math.round(cashflowData.caTotal).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
+                </div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>{cashflowData.nbProjects} projet(s) Won</div>
+              </div>
+              <div style={{ padding: "18px 24px", borderRight: "1px solid rgba(166,201,206,0.08)" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>− Commissions</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: "#f97316", fontFamily: "monospace" }}>−{Math.round(cashflowData.commissionsTotal).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
+                </div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
+                  {cashflowData.caTotal > 0 ? ((cashflowData.commissionsTotal / cashflowData.caTotal) * 100).toFixed(1) : "0"} % du CA
+                </div>
+              </div>
+              <div style={{ padding: "18px 24px" }}>
+                <div style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontWeight: 500, textTransform: "uppercase", letterSpacing: "0.06em" }}>= Revenu net</div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 6 }}>
+                  <span style={{ fontSize: 26, fontWeight: 800, color: "var(--accent)", fontFamily: "monospace" }}>{Math.round(cashflowData.revenuNet).toLocaleString("fr-FR")}</span>
+                  <span style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)" }}>MUR</span>
+                </div>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4 }}>
+                  {cashflowData.margeNettePct.toFixed(1)} % du CA · net de commissions
+                </div>
+              </div>
+            </div>
+
+            {/* Histogramme mensuel */}
+            {cashflowData.months.length > 0 ? (
+              <div style={{ padding: "16px 24px" }}>
+                <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 10 }}>Répartition mensuelle (CA net)</div>
+                <div style={{ display: "flex", alignItems: "flex-end", gap: 6, height: 80 }}>
+                  {(() => {
+                    const maxVal = Math.max(...cashflowData.months.map(m => m.ca), 1)
+                    return cashflowData.months.map(m => (
+                      <div key={m.code} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                        <div style={{ color: "var(--text-muted)", fontFamily: "monospace", fontSize: 9 }}>
+                          {m.ca > 0 ? Math.round(m.ca / 1000) + "k" : ""}
+                        </div>
+                        <div
+                          title={`${m.label} · ${Math.round(m.ca).toLocaleString("fr-FR")} MUR CA · ${Math.round(m.net).toLocaleString("fr-FR")} MUR net`}
+                          style={{
+                            width: "100%",
+                            height: m.ca > 0 ? Math.max(4, Math.round((m.ca / maxVal) * 56)) : 2,
+                            borderRadius: 3,
+                            background: m.isFuture
+                              ? "rgba(166,201,206,0.25)"
+                              : "linear-gradient(180deg, #A6C9CE 0%, #6ba8ae 100%)",
+                            border: m.isFuture ? "1px dashed rgba(166,201,206,0.4)" : "none",
+                            transition: "height 0.3s ease",
+                          }}
+                        />
+                        <div style={{ fontSize: 9, color: "var(--text-muted)", textAlign: "center", whiteSpace: "nowrap", overflow: "hidden", maxWidth: "100%" }}>
+                          {m.label.slice(0, 3)}
+                        </div>
+                      </div>
+                    ))
+                  })()}
+                </div>
+                <div style={{ display: "flex", gap: 16, marginTop: 8, fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: "linear-gradient(180deg, #A6C9CE 0%, #6ba8ae 100%)", display: "inline-block" }} />
+                    Passé
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 2, background: "rgba(166,201,206,0.25)", border: "1px dashed rgba(166,201,206,0.4)", display: "inline-block" }} />
+                    Projeté (End Date)
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: "16px 24px", fontSize: "var(--fs-xs)", color: "var(--text-muted)", fontStyle: "italic" }}>
+                Aucun projet Won avec End Date sur la période sélectionnée.
               </div>
             )}
           </div>
