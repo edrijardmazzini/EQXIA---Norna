@@ -12,11 +12,13 @@ import {
   BarChart3, Telescope, Settings, TrendingUp, Percent, Wallet, Zap,
   CheckCircle2, AlertTriangle, XCircle, Monitor, Moon, Sun, BarChart2, LineChart,
   Database, AlertOctagon, AlertCircle, Users, DollarSign, RefreshCw,
-  Briefcase, UserCheck, CalendarX, ShieldAlert, Info, ExternalLink,
+  Briefcase, UserCheck, CalendarX, ShieldAlert, Info, ExternalLink, Banknote,
 } from "lucide-react"
 import { EqxiaLoadingScreen } from "@/components/eqxia"
 import { GenericEditModal } from "@/components/sales/GenericEditModal"
 import { ReglagesContent } from "@/components/layout/ReglagesContent"
+import { CashflowView } from "@/components/cashflow/CashflowView"
+import type { CashflowViewProps } from "@/components/cashflow/CashflowView"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -429,7 +431,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   const [themeOpen, setThemeOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState<"dashboard" | "previsionnel">("dashboard")
+  const [activeTab, setActiveTab] = useState<"dashboard" | "previsionnel" | "cashflow">("dashboard")
   const [bgImage, setBgImage] = useState(BG_IMAGES[0])
   const [timeRange, setTimeRange] = useState<"all" | "12m" | "6m" | "3m">("all")
   // Hero chart mode : Past (historique), Future (projection), Custom (plage libre)
@@ -1722,7 +1724,7 @@ export default function DashboardPage() {
 
           {/* ── Tabs navigation ── */}
           <div style={{ display: "flex", gap: 4, marginBottom: 20, borderBottom: "1px solid var(--border-subtle)" }}>
-            {([["dashboard", <><BarChart3 size={13} style={{ marginRight: 5, flexShrink: 0 }} />Dashboard</>], ["previsionnel", <><Telescope size={13} style={{ marginRight: 5, flexShrink: 0 }} />Prévisionnel</>]] as [string, React.ReactNode][]).map(([key, label]) => (
+            {([["dashboard", <><BarChart3 size={13} style={{ marginRight: 5, flexShrink: 0 }} />Dashboard</>], ["previsionnel", <><Telescope size={13} style={{ marginRight: 5, flexShrink: 0 }} />Prévisionnel</>], ["cashflow", <><Banknote size={13} style={{ marginRight: 5, flexShrink: 0 }} />Cashflow</>]] as [string, React.ReactNode][]).map(([key, label]) => (
               <button
                 key={key}
                 onClick={() => setActiveTab(key as any)}
@@ -1751,7 +1753,21 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {activeTab === "previsionnel" ? (
+          {activeTab === "cashflow" ? (
+            <CashflowView
+              transactions={transactions}
+              depenses={depenses}
+              cashflowData={cashflowData}
+              cfViewMode={cfViewMode} setCfViewMode={setCfViewMode}
+              cfViewPast={cfViewPast} setCfViewPast={setCfViewPast}
+              cfViewFuture={cfViewFuture} setCfViewFuture={setCfViewFuture}
+              cfViewCustomStart={cfViewCustomStart} setCfViewCustomStart={setCfViewCustomStart}
+              cfViewCustomEnd={cfViewCustomEnd} setCfViewCustomEnd={setCfViewCustomEnd}
+              fyLabel={fy.label}
+              currentDossier={currentDossier}
+              onTransactionUpdated={updated => setTransactions(prev => prev.map(t => t.id === updated.id ? updated : t))}
+            />
+          ) : activeTab === "previsionnel" ? (
             <PrevisionnelView
               projects={projects}
               employees={employees}
@@ -2750,8 +2766,8 @@ export default function DashboardPage() {
             )}
           </div>
 
-          {/* ── Cashflow (DB Transactions) ── */}
-          <div style={{ ...card, marginTop: 24, padding: 0, overflow: "hidden" }}>
+          {/* ── [Cashflow déplacé dans l'onglet Cashflow] ── */}
+          {false && <div style={{ ...card, marginTop: 24, padding: 0, overflow: "hidden" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)", flexWrap: "wrap", gap: 12 }}>
               <div>
                 <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>
@@ -2878,7 +2894,7 @@ export default function DashboardPage() {
                 Aucune facture sur la période sélectionnée.
               </div>
             )}
-          </div>
+          </div>}
 
           {/* ── Database Review Critical ── */}
           <div style={{ ...card, marginTop: 24, padding: 0, overflow: "hidden" }}>
