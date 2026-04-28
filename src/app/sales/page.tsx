@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import { Monitor, Moon, Sun, Settings, AlertTriangle, AlertOctagon, Info, CheckCircle2, ExternalLink, Database } from 'lucide-react'
+import { GenericEditModal } from '@/components/sales/GenericEditModal'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { useTheme } from '@/hooks/useTheme'
 import { useProjectsData } from '@/hooks/useProjectsData'
@@ -484,6 +485,7 @@ function IssueIcon({ level }: { level: IssueLevel }) {
 function SalesSettings({ projects, clients }: { projects: Project[]; clients: Client[] }) {
   const [levelFilter, setLevelFilter] = useState<'all' | 'critical' | 'warning'>('critical')
   const [sourceFilter, setSourceFilter] = useState<'all' | 'projects' | 'clients'>('all')
+  const [genericEdit, setGenericEdit] = useState<{ entity: 'project'; data: Record<string, unknown> } | null>(null)
 
   const activeProjects = projects.filter(p => !['Lost', 'Cancelled'].includes(p.status))
 
@@ -642,36 +644,59 @@ function SalesSettings({ projects, clients }: { projects: Project[]; clients: Cl
                   <th style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 500, fontSize: 'var(--fs-2xs)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Entité</th>
                   <th style={{ padding: '8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 500, fontSize: 'var(--fs-2xs)', textTransform: 'uppercase', letterSpacing: '0.06em', width: 120 }}>Champ</th>
                   <th style={{ padding: '8px 20px 8px 12px', textAlign: 'left', color: 'var(--text-muted)', fontWeight: 500, fontSize: 'var(--fs-2xs)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Message</th>
+                  <th style={{ padding: '8px 12px', width: 60 }} />
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((issue, idx) => (
-                  <tr key={idx} style={{ borderTop: '1px solid var(--border-subtle)', background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
-                    <td style={{ padding: '8px 20px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <IssueIcon level={issue.level} />
-                        <span style={{ fontSize: 'var(--fs-2xs)', color: issue.level === 'critical' ? '#ef4444' : issue.level === 'warning' ? '#facc15' : '#60a5fa', fontWeight: 600, textTransform: 'capitalize' }}>
-                          {issue.level}
-                        </span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '8px 12px' }}>
-                      <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', textTransform: 'capitalize' }}>{issue.source}</span>
-                    </td>
-                    <td style={{ padding: '8px 12px', color: 'var(--text-primary)', maxWidth: 200 }}>
-                      <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{issue.entity}</span>
-                    </td>
-                    <td style={{ padding: '8px 12px' }}>
-                      <code style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-secondary)', background: 'var(--bg-input)', padding: '1px 5px', borderRadius: 3 }}>{issue.field}</code>
-                    </td>
-                    <td style={{ padding: '8px 20px 8px 12px', color: 'var(--text-muted)' }}>{issue.message}</td>
-                  </tr>
-                ))}
+                {filtered.map((issue, idx) => {
+                  const projectData = issue.source === 'projects'
+                    ? projects.find(p => p.name === issue.entity || p.id === issue.entity) as unknown as Record<string, unknown> | undefined
+                    : undefined
+                  return (
+                    <tr key={idx} style={{ borderTop: '1px solid var(--border-subtle)', background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
+                      <td style={{ padding: '8px 20px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                          <IssueIcon level={issue.level} />
+                          <span style={{ fontSize: 'var(--fs-2xs)', color: issue.level === 'critical' ? '#ef4444' : issue.level === 'warning' ? '#facc15' : '#60a5fa', fontWeight: 600, textTransform: 'capitalize' }}>
+                            {issue.level}
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '8px 12px' }}>
+                        <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', textTransform: 'capitalize' }}>{issue.source}</span>
+                      </td>
+                      <td style={{ padding: '8px 12px', color: 'var(--text-primary)', maxWidth: 200 }}>
+                        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{issue.entity}</span>
+                      </td>
+                      <td style={{ padding: '8px 12px' }}>
+                        <code style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-secondary)', background: 'var(--bg-input)', padding: '1px 5px', borderRadius: 3 }}>{issue.field}</code>
+                      </td>
+                      <td style={{ padding: '8px 20px 8px 12px', color: 'var(--text-muted)' }}>{issue.message}</td>
+                      <td style={{ padding: '6px 12px' }}>
+                        {projectData && (
+                          <button
+                            onClick={() => setGenericEdit({ entity: 'project', data: projectData })}
+                            style={{ background: 'rgba(166,201,206,0.08)', border: '1px solid var(--border-subtle)', borderRadius: 4, color: 'var(--text-muted)', cursor: 'pointer', fontSize: 10, padding: '2px 7px', fontFamily: 'inherit', whiteSpace: 'nowrap' }}
+                          >Edit+</button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {genericEdit && (
+        <GenericEditModal
+          entity={genericEdit.entity}
+          data={genericEdit.data}
+          onSave={() => setGenericEdit(null)}
+          onClose={() => setGenericEdit(null)}
+        />
+      )}
 
     </div>
   )

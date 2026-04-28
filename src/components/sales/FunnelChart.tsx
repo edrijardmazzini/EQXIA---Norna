@@ -1,11 +1,15 @@
 'use client'
 
 import { useState, useMemo } from 'react'
+import {
+  FunnelChart as RechartsFunnel, Funnel, LabelList, Cell,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+} from 'recharts'
 import type { Project } from '@/types/sales'
 import { PIPELINE_COLS, CLOSED_WON, fmtCurrency } from '@/types/sales'
 
 interface FunnelChartProps { projects: Project[] }
-type ViewMode = 'funnel' | 'bars'
+type ViewMode = 'funnel' | 'bars' | 'recharts' | 'bar-v'
 
 // ── Data helpers ───────────────────────────────────────────────────────────
 
@@ -81,7 +85,6 @@ function FunnelStage({ stage, maxValue, isLast }: {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0 }}>
-      {/* Barre centrée, largeur ∝ CA×gut */}
       <div
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
@@ -104,7 +107,6 @@ function FunnelStage({ stage, maxValue, isLast }: {
             {stage.count}
           </span>
         )}
-        {/* Tooltip au survol */}
         {hovered && (
           <div style={{
             position: 'absolute', top: '100%', left: '50%', transform: 'translateX(-50%)',
@@ -125,7 +127,6 @@ function FunnelStage({ stage, maxValue, isLast }: {
         )}
       </div>
 
-      {/* Étiquette sous la barre */}
       <div style={{
         width: `${pct}%`, display: 'flex', justifyContent: 'space-between',
         padding: '2px 4px', boxSizing: 'border-box',
@@ -140,7 +141,6 @@ function FunnelStage({ stage, maxValue, isLast }: {
         )}
       </div>
 
-      {/* Connecteur trapézoïdal vers l'étape suivante */}
       {!isLast && (
         <div style={{ height: 4, width: '100%', display: 'flex', justifyContent: 'center' }}>
           <div style={{ width: `${pct}%`, height: '100%', background: `${stage.fill}33` }} />
@@ -181,6 +181,68 @@ function StepBar({ step, maxCount, convRate, isLast }: {
   )
 }
 
+// ── Vue recharts FunnelChart natif ─────────────────────────────────────────
+
+function RechartsView({ funnelData }: { funnelData: ReturnType<typeof buildFunnelData> }) {
+  const data = funnelData.filter(d => d.value > 0 || d.count > 0)
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <RechartsFunnel>
+        <Tooltip
+          contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 6, fontSize: 12 }}
+          formatter={(v: unknown) => [typeof v === 'number' ? fmtCurrency(v) : String(v), 'CA×gut'] as [string, string]}
+        />
+        <Funnel dataKey="value" data={data} isAnimationActive={false}>
+          {data.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+          <LabelList
+            position="right"
+            content={({ x, y, width, height, value, index }: any) => {
+              const entry = data[index as number]
+              if (!entry) return null
+              return (
+                <g>
+                  <text x={(x as number) + (width as number) + 10} y={(y as number) + (height as number) / 2 - 6} fill="var(--text-secondary)" fontSize={11} fontWeight={600}>{entry.name}</text>
+                  <text x={(x as number) + (width as number) + 10} y={(y as number) + (height as number) / 2 + 9} fill="var(--accent)" fontSize={10}>{entry.count} deal{entry.count !== 1 ? 's' : ''}</text>
+                </g>
+              )
+            }}
+          />
+        </Funnel>
+      </RechartsFunnel>
+    </ResponsiveContainer>
+  )
+}
+
+// ── Vue barres verticales recharts ─────────────────────────────────────────
+
+function BarVView({ funnelData }: { funnelData: ReturnType<typeof buildFunnelData> }) {
+  const data = funnelData.map(d => ({
+    name: d.name.replace(' ✓', ''),
+    Deals: d.count,
+    'CA×gut (k)': Math.round(d.value / 1000),
+    fill: d.fill,
+  }))
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <BarChart data={data} margin={{ left: 0, right: 20, top: 8, bottom: 24 }} barCategoryGap="20%">
+        <CartesianGrid strokeDasharray="3 3" stroke="rgba(166,201,206,0.07)" vertical={false} />
+        <XAxis dataKey="name" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} interval={0} angle={-30} textAnchor="end" height={40} />
+        <YAxis yAxisId="left" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} />
+        <YAxis yAxisId="right" orientation="right" tick={{ fill: 'var(--text-muted)', fontSize: 10 }} axisLine={false} tickLine={false} tickFormatter={(v: number) => `${v}k`} />
+        <Tooltip
+          contentStyle={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 6, fontSize: 12 }}
+          formatter={(v: unknown, name: unknown) => [name === 'CA×gut (k)' ? `${v}k MUR` : String(v), name as string] as [string, string]}
+        />
+        <Legend wrapperStyle={{ fontSize: 11, color: 'var(--text-muted)', paddingTop: 8 }} />
+        <Bar yAxisId="left" dataKey="Deals" radius={[4, 4, 0, 0]}>
+          {data.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+        </Bar>
+        <Bar yAxisId="right" dataKey="CA×gut (k)" fill="#A6C9CE" opacity={0.55} radius={[4, 4, 0, 0]} />
+      </BarChart>
+    </ResponsiveContainer>
+  )
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 export function FunnelChart({ projects }: FunnelChartProps) {
@@ -197,7 +259,7 @@ export function FunnelChart({ projects }: FunnelChartProps) {
 
   return (
     <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ display: 'flex', gap: 4 }}>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         <Btn active={mode === 'funnel'} onClick={() => setMode('funnel')}>
           <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
             <path d="M1 1.5h11L8.5 6v4.5L4.5 9V6L1 1.5z" fill="currentColor"/>
@@ -212,9 +274,23 @@ export function FunnelChart({ projects }: FunnelChartProps) {
           </svg>
           Histogramme
         </Btn>
+        <Btn active={mode === 'recharts'} onClick={() => setMode('recharts')}>
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <path d="M1 2h11v2L7.5 7.5V12h-2V7.5L1 4V2z" fill="currentColor"/>
+          </svg>
+          Pyramide
+        </Btn>
+        <Btn active={mode === 'bar-v'} onClick={() => setMode('bar-v')}>
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <rect x="1" y="5" width="2.5" height="7" rx="1" fill="currentColor"/>
+            <rect x="5" y="3" width="2.5" height="9" rx="1" fill="currentColor"/>
+            <rect x="9" y="1" width="2.5" height="11" rx="1" fill="currentColor"/>
+          </svg>
+          Groupé
+        </Btn>
       </div>
 
-      {mode === 'funnel' ? (
+      {mode === 'funnel' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2, padding: '8px 0' }}>
           {funnelData.map((stage, i) => (
             <FunnelStage
@@ -225,7 +301,9 @@ export function FunnelChart({ projects }: FunnelChartProps) {
             />
           ))}
         </div>
-      ) : (
+      )}
+
+      {mode === 'bars' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {barsData.map((step, i) => {
             const prev = barsData[i - 1]
@@ -234,6 +312,9 @@ export function FunnelChart({ projects }: FunnelChartProps) {
           })}
         </div>
       )}
+
+      {mode === 'recharts' && <RechartsView funnelData={funnelData} />}
+      {mode === 'bar-v' && <BarVView funnelData={funnelData} />}
     </div>
   )
 }

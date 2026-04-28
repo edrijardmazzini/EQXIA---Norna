@@ -15,6 +15,8 @@ import {
   Briefcase, UserCheck, CalendarX, ShieldAlert, Info, ExternalLink,
 } from "lucide-react"
 import { EqxiaLoadingScreen } from "@/components/eqxia"
+import { GenericEditModal } from "@/components/sales/GenericEditModal"
+import { ReglagesContent } from "@/components/layout/ReglagesContent"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -473,6 +475,8 @@ export default function DashboardPage() {
   const [revByEmployee, setRevByEmployee] = useState(false)
   const [depByEmployee, setDepByEmployee] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
+  const [showReglagesPanel, setShowReglagesPanel] = useState(false)
+  const [genericEditPl, setGenericEditPl] = useState<{ entity: 'project'; data: Record<string, unknown> } | null>(null)
 
   const currentRevMois = hoverRevMois
   const currentDepMois = hoverDepMois
@@ -1577,13 +1581,13 @@ export default function DashboardPage() {
                 const email = session?.user?.email?.toLowerCase()
                 if (!email || !adminEmails.has(email)) return null
                 return (
-                  <a
-                    href="/reglages"
-                    style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", textDecoration: "none", padding: "4px 10px", borderRadius: "var(--radius-btn)", border: "1px solid var(--border-subtle)", background: "var(--bg-card)", whiteSpace: "nowrap" }}
-                    title="Page admin — règles de calcul + taux de conversion"
+                  <button
+                    onClick={() => setShowReglagesPanel(true)}
+                    style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", padding: "4px 10px", borderRadius: "var(--radius-btn)", border: "1px solid var(--border-subtle)", background: "var(--bg-card)", whiteSpace: "nowrap", cursor: "pointer", fontFamily: "inherit" }}
+                    title="Règles de calcul + taux de conversion"
                   >
                     <span style={{ display: "flex", alignItems: "center", gap: 5 }}><Settings size={13} />Réglages</span>
-                  </a>
+                  </button>
                 )
               })()}
               <button
@@ -2145,7 +2149,7 @@ export default function DashboardPage() {
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
                           <thead style={{ position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 2 }}>
                             <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
-                              {["Date", "Projet", "Client", "Type", "Status", "Montant", "MUR"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                              {["Date", "Projet", "Client", "Type", "Status", "Montant", "MUR", ""].map(h => <th key={h} style={thStyle}>{h}</th>)}
                             </tr>
                           </thead>
                           <tbody>
@@ -2166,6 +2170,7 @@ export default function DashboardPage() {
                                   <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status}</td>
                                   <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 600 }}>{Math.round(getRevenueRaw(p)).toLocaleString("fr-FR")} {p.currency}</td>
                                   <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "var(--accent)" }}>{Math.round(getRevenueMUR(p)).toLocaleString("fr-FR")}</td>
+                                  <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'project', data: p as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                                 </tr>
                               )
                             })}
@@ -2453,7 +2458,7 @@ export default function DashboardPage() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
                   <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--bg-panel)" }}>
                     <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
-                      {["Date", "Projet", "Client", "Montant", "Type", "Status"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                      {["Date", "Projet", "Client", "Montant", "Type", "Status", ""].map(h => <th key={h} style={thStyle}>{h}</th>)}
                     </tr>
                     <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.12)" }}>
                       <th style={filterCellStyle}>
@@ -2487,6 +2492,7 @@ export default function DashboardPage() {
                       <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace" }}>{Math.round(getRevenueRaw(p)).toLocaleString("fr-FR")} {p.currency}</td>
                       <td style={tdStyle}>{p.type ? (() => { const c = projectTypeColors[p.type] || "#A6C9CE"; return <span style={{ background: `${c}22`, color: c, padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{p.type}</span> })() : "—"}</td>
                       <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status}</td>
+                      <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'project', data: p as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -2711,6 +2717,7 @@ export default function DashboardPage() {
                         <th style={thStyle}>Client</th>
                         <th style={thStyle}>Status</th>
                         <th style={thStyle}>Champs manquants</th>
+                        <th style={thStyle} />
                       </tr>
                     </thead>
                     <tbody>
@@ -2743,6 +2750,7 @@ export default function DashboardPage() {
                                 ))}
                               </div>
                             </td>
+                            <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'project', data: p as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                           </tr>
                         )
                       })}
@@ -2875,6 +2883,36 @@ export default function DashboardPage() {
           </div>
         )
       })()}
+
+      {genericEditPl && (
+        <GenericEditModal
+          entity={genericEditPl.entity}
+          data={genericEditPl.data}
+          onSave={updated => {
+            setProjects(prev => prev.map(p => p.id === genericEditPl.data.id ? { ...p, ...updated } : p))
+            setGenericEditPl(null)
+          }}
+          onClose={() => setGenericEditPl(null)}
+        />
+      )}
+
+      {showReglagesPanel && (
+        <>
+          <div onClick={() => setShowReglagesPanel(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1299 }} />
+          <div onClick={e => e.stopPropagation()} style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: "min(820px, 96vw)", zIndex: 1300, background: "var(--bg-page)", borderLeft: "1px solid var(--border-subtle)", display: "flex", flexDirection: "column", boxShadow: "-16px 0 48px rgba(0,0,0,0.5)", animation: "slide-in-right 0.25s ease" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid var(--border-subtle)", flexShrink: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <Settings size={16} color="var(--accent)" />
+                <span style={{ fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-primary)" }}>Réglages Plutus</span>
+              </div>
+              <button onClick={() => setShowReglagesPanel(false)} style={{ background: "none", border: "1px solid var(--border-subtle)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: 14, width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "inherit" }}>✕</button>
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "24px" }}>
+              <ReglagesContent />
+            </div>
+          </div>
+        </>
+      )}
 
       {showExportModal && (
         <>
