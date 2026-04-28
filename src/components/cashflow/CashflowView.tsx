@@ -113,8 +113,8 @@ function AgingChart({ transactions }: { transactions: Transaction[] }) {
   const [tip, setTip] = useState<{ t: Transaction; x: number; y: number } | null>(null)
   const svgRef = useRef<SVGSVGElement>(null)
 
-  const W = 900, H = 220
-  const PL = 10, PR = 10, PT = 30, PB = 30
+  const W = 900, H = 130
+  const PL = 10, PR = 10, PT = 22, PB = 26
   const plotW = W - PL - PR
 
   const now = new Date(); now.setHours(0,0,0,0)
@@ -131,7 +131,6 @@ function AgingChart({ transactions }: { transactions: Transaction[] }) {
     return PL + ((ms - startMs) / spanMs) * plotW
   }
 
-  // Y jitter — deterministic from id
   const yJit = (id: string, range: number) => {
     const h = id.split('').reduce((a,c) => (a*31 + c.charCodeAt(0)) & 0xffff, 0)
     return (h % range) - range/2
@@ -139,19 +138,12 @@ function AgingChart({ transactions }: { transactions: Transaction[] }) {
 
   const dotR = (amt: number) => Math.max(3, Math.min(11, Math.sqrt(Math.abs(amt)/8000)*2.5 + 3))
 
-  // Lane 1 – pending acceptance
-  const pendAcc = transactions.filter(t =>
-    t.dateIssued && !t.dateAccepted &&
-    !['Paid','Cancelled','Rejected','Written Off'].includes(t.status)
-  )
-  const L1 = PT + 25
-
-  // Lane 2 – pending payment (invoices with due date, unpaid)
+  // Factures non payées — positionnées à la Due Date
   const pendPay = transactions.filter(t =>
     t.type === 'Invoice' && (t.dueDate || t.dateIssued) && !t.datePaid &&
     !['Cancelled','Written Off','Rejected'].includes(t.status)
   )
-  const L2 = PT + 115
+  const LANE_CY = PT + 28
 
   // Month ticks
   const ticks: { x: number; label: string }[] = []
@@ -166,16 +158,15 @@ function AgingChart({ transactions }: { transactions: Transaction[] }) {
     if (!tip) return
     const rect = svgRef.current?.getBoundingClientRect()
     if (!rect) return
-    const scaleX = W / rect.width
-    setTip(prev => prev ? { ...prev, x: (e.clientX - rect.left) * scaleX, y: (e.clientY - rect.top) * (H / rect.height) } : null)
+    setTip(prev => prev ? { ...prev, x: (e.clientX - rect.left) * (W / rect.width), y: (e.clientY - rect.top) * (H / rect.height) } : null)
   }
 
   return (
     <div style={{ ...CARD, marginBottom: 0 }}>
       <div style={{ padding:'14px 20px 12px', borderBottom:'1px solid rgba(166,201,206,0.08)', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
         <div>
-          <span style={{ fontSize:'var(--fs-sm)', fontWeight:600, color:'var(--text-primary)' }}>📊 Pipeline Aging</span>
-          <span style={{ fontSize:'var(--fs-xs)', color:'var(--text-muted)', marginLeft:10 }}>vert = récent · rouge = en attente depuis longtemps</span>
+          <span style={{ fontSize:'var(--fs-sm)', fontWeight:600, color:'var(--text-primary)' }}>📊 Aging · En attente de paiement</span>
+          <span style={{ fontSize:'var(--fs-xs)', color:'var(--text-muted)', marginLeft:10 }}>positionné à la Due Date · vert = à temps · rouge = en retard</span>
         </div>
         <div style={{ display:'flex', gap:12, fontSize:'var(--fs-2xs)', color:'var(--text-muted)', alignItems:'center' }}>
           <span style={{ display:'flex', alignItems:'center', gap:4 }}><span style={{ width:8, height:8, borderRadius:'50%', background:'hsl(120,78%,48%)', display:'inline-block' }}/>{'< 7 j'}</span>
@@ -187,54 +178,23 @@ function AgingChart({ transactions }: { transactions: Transaction[] }) {
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display:'block', overflow:'visible' }}
           onMouseMove={handleMouseMove} onMouseLeave={() => setTip(null)}>
 
-          {/* Lane backgrounds */}
-          <rect x={PL} y={PT+6} width={plotW} height={42} rx={4} fill="rgba(166,201,206,0.04)" stroke="rgba(166,201,206,0.08)" strokeWidth={1}/>
-          <rect x={PL} y={PT+96} width={plotW} height={42} rx={4} fill="rgba(166,201,206,0.04)" stroke="rgba(166,201,206,0.08)" strokeWidth={1}/>
-
-          {/* Lane labels */}
-          <text x={PL} y={PT+2} fontSize={9} fill="rgba(166,201,206,0.55)" fontFamily="inherit" fontWeight="600" style={{ letterSpacing:'0.08em' }}>
-            {`EN ATTENTE D'ACCEPTATION (${pendAcc.length})`}
-          </text>
-          <text x={PL} y={PT+92} fontSize={9} fill="rgba(166,201,206,0.55)" fontFamily="inherit" fontWeight="600" style={{ letterSpacing:'0.08em' }}>
+          {/* Lane label + background */}
+          <text x={PL} y={PT-2} fontSize={9} fill="rgba(166,201,206,0.55)" fontFamily="inherit" fontWeight="600" style={{ letterSpacing:'0.08em' }}>
             {`EN ATTENTE DE PAIEMENT (${pendPay.length})`}
           </text>
+          <rect x={PL} y={PT+4} width={plotW} height={46} rx={4} fill="rgba(166,201,206,0.04)" stroke="rgba(166,201,206,0.08)" strokeWidth={1}/>
 
           {/* Today line */}
-          <line x1={todayX} y1={PT+2} x2={todayX} y2={PT+140} stroke="rgba(166,201,206,0.35)" strokeWidth={1} strokeDasharray="3 3"/>
-          <text x={todayX+3} y={PT+14} fontSize={8} fill="rgba(166,201,206,0.5)" fontFamily="inherit">Aujourd&apos;hui</text>
+          <line x1={todayX} y1={PT-2} x2={todayX} y2={PT+52} stroke="rgba(166,201,206,0.35)" strokeWidth={1} strokeDasharray="3 3"/>
+          <text x={todayX+3} y={PT+10} fontSize={8} fill="rgba(166,201,206,0.5)" fontFamily="inherit">Aujourd&apos;hui</text>
 
-          {/* Month ticks */}
-          {ticks.map(t => (
-            <g key={t.label}>
-              <line x1={t.x} y1={PT+140} x2={t.x} y2={PT+145} stroke="rgba(166,201,206,0.2)" strokeWidth={1}/>
-              <text x={t.x} y={PT+156} fontSize={8} fill="rgba(166,201,206,0.45)" fontFamily="inherit" textAnchor="middle">{t.label}</text>
-            </g>
-          ))}
-
-          {/* Lane 1 dots — pending acceptance */}
-          {pendAcc.map(t => {
-            const x = xFor(t.dateIssued)
-            if (x === null || x < PL-5 || x > W-PR+5) return null
-            const days = (nowMs - new Date(t.dateIssued).getTime()) / 86400000
-            const y = L1 + yJit(t.id, 28)
-            const r = dotR(t.amount)
-            return (
-              <circle key={t.id} cx={x} cy={y} r={r}
-                fill={agingColor(days)} opacity={0.88}
-                onMouseEnter={() => setTip({ t, x, y })}
-                onMouseLeave={() => setTip(null)}
-                style={{ cursor:'pointer' }}
-              />
-            )
-          })}
-
-          {/* Lane 2 dots — pending payment */}
+          {/* Dots */}
           {pendPay.map(t => {
             const ref = t.dueDate || t.dateIssued
             const x = xFor(ref)
             if (x === null || x < PL-5 || x > W-PR+5) return null
             const days = (nowMs - new Date(ref).getTime()) / 86400000
-            const y = L2 + yJit(t.id, 28)
+            const y = LANE_CY + yJit(t.id, 30)
             const r = dotR(t.amount)
             return (
               <circle key={t.id} cx={x} cy={y} r={r}
@@ -245,16 +205,22 @@ function AgingChart({ transactions }: { transactions: Transaction[] }) {
               />
             )
           })}
+
+          {/* Month ticks */}
+          {ticks.map(t => (
+            <g key={t.label}>
+              <line x1={t.x} y1={PT+52} x2={t.x} y2={PT+57} stroke="rgba(166,201,206,0.2)" strokeWidth={1}/>
+              <text x={t.x} y={PT+68} fontSize={8} fill="rgba(166,201,206,0.45)" fontFamily="inherit" textAnchor="middle">{t.label}</text>
+            </g>
+          ))}
         </svg>
 
-        {/* Tooltip HTML overlay */}
+        {/* Tooltip */}
         {tip && (() => {
           const svgRect = svgRef.current?.getBoundingClientRect()
           if (!svgRect) return null
-          const scaleX = svgRect.width / W
-          const scaleY = svgRect.height / H
-          const px = tip.x * scaleX
-          const py = tip.y * scaleY
+          const px = tip.x * (svgRect.width / W)
+          const py = tip.y * (svgRect.height / H)
           const ref = tip.t.dueDate || tip.t.dateIssued
           const days = ref ? (nowMs - new Date(ref).getTime()) / 86400000 : 0
           return (
@@ -270,7 +236,7 @@ function AgingChart({ transactions }: { transactions: Transaction[] }) {
               {tip.t.dateIssued && <div style={{ color:'var(--text-muted)', marginTop:2, fontSize:'var(--fs-2xs)' }}>Émis : {tip.t.dateIssued}</div>}
               {tip.t.dueDate && <div style={{ color:'var(--text-muted)', fontSize:'var(--fs-2xs)' }}>Échéance : {tip.t.dueDate}</div>}
               <div style={{ color:agingColor(Math.max(0, days)), fontSize:'var(--fs-2xs)', marginTop:2, fontWeight:600 }}>
-                {days < 0 ? `Échéance dans ${Math.round(-days)} j` : `${Math.round(days)} j sans action`}
+                {days < 0 ? `Échéance dans ${Math.round(-days)} j` : `${Math.round(days)} j de retard`}
               </div>
             </div>
           )
