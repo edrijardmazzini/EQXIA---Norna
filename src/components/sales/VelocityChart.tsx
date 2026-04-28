@@ -1,5 +1,6 @@
 'use client'
 
+import { useMemo } from 'react'
 import type { Project } from '@/types/sales'
 import { PIPELINE_COLS, CLOSED_WON } from '@/types/sales'
 import {
@@ -92,7 +93,7 @@ function VelocityTooltip({ active, payload }: { active?: boolean; payload?: Tool
 }
 
 export function VelocityChart({ projects }: Props) {
-  const data = computeStageData(projects)
+  const data = useMemo(() => computeStageData(projects), [projects])
 
   if (data.length === 0) {
     return (
@@ -138,8 +139,8 @@ export function VelocityChart({ projects }: Props) {
         />
         <Tooltip content={<VelocityTooltip />} cursor={{ fill: '#ffffff06' }} />
         <Bar dataKey='avgDays' radius={[0, 4, 4, 0]} maxBarSize={32}>
-          {data.map((entry, i) => (
-            <Cell key={i} fill={entry.accent} fillOpacity={0.8} />
+          {data.map(entry => (
+            <Cell key={entry.label} fill={entry.accent} fillOpacity={0.8} />
           ))}
         </Bar>
       </BarChart>

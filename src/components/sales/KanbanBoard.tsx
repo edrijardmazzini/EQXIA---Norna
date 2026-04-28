@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import type { Project, Client, Employee } from '@/types/sales'
 import { PIPELINE_COLS, CLOSED_WON, CLOSED_LOST, TYPE_COLORS, fmtCurrency, winFactor } from '@/types/sales'
 import { DealCard } from './DealCard'
@@ -87,18 +87,27 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
     ownerId: '', nextAction: '', nextActionDate: '', winPercent: 20,
   })
 
-  const pipelineDeals = projects.filter(p =>
-    !CLOSED_WON.has(p.status) && !CLOSED_LOST.has(p.status) && p.status !== 'Completed' && p.status !== 'On Hold'
+  const pipelineDeals = useMemo(() =>
+    projects.filter(p =>
+      !CLOSED_WON.has(p.status) && !CLOSED_LOST.has(p.status) && p.status !== 'Completed' && p.status !== 'On Hold'
+    ),
+    [projects],
   )
 
-  const pipelineTypes = Array.from(new Set(pipelineDeals.map(d => d.type).filter(Boolean))).sort()
+  const pipelineTypes = useMemo(() =>
+    Array.from(new Set(pipelineDeals.map(d => d.type).filter(Boolean))).sort() as string[],
+    [pipelineDeals],
+  )
 
-  const filtered = pipelineDeals.filter(d => {
-    if (ownerFilter && d.ownerName !== ownerFilter) return false
-    if (clientFilter && !d.clientIds.includes(clientFilter)) return false
-    if (typeFilter && d.type !== typeFilter) return false
-    return true
-  })
+  const filtered = useMemo(() =>
+    pipelineDeals.filter(d => {
+      if (ownerFilter && d.ownerName !== ownerFilter) return false
+      if (clientFilter && !d.clientIds.includes(clientFilter)) return false
+      if (typeFilter && d.type !== typeFilter) return false
+      return true
+    }),
+    [pipelineDeals, ownerFilter, clientFilter, typeFilter],
+  )
 
   async function moveDeal(dealId: string, newStatus: string) {
     const deal = projects.find(p => p.id === dealId)

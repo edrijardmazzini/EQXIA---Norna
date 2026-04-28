@@ -21,9 +21,10 @@ export function useProjectsData(): UseProjectsDataReturn {
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
+    const ctrl = new AbortController()
     setLoading(true)
     setError('')
-    fetch('/api/sales')
+    fetch('/api/sales', { signal: ctrl.signal })
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json() as Promise<{ projects: Project[]; clients: Client[]; employees: Employee[] }>
@@ -33,8 +34,9 @@ export function useProjectsData(): UseProjectsDataReturn {
         setClients(d.clients || [])
         setEmployees(d.employees || [])
       })
-      .catch(e => setError((e as Error).message))
+      .catch(e => { if ((e as Error).name !== 'AbortError') setError((e as Error).message) })
       .finally(() => setLoading(false))
+    return () => ctrl.abort()
   }, [tick])
 
   return { projects, clients, employees, loading, error, reload: () => setTick(t => t + 1) }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import type { Project } from '@/types/sales'
 import { PIPELINE_COLS } from '@/types/sales'
 
@@ -35,7 +35,25 @@ function cellBorder(count: number): string {
 export function StaleHeatmap({ projects, onDealClick }: Props) {
   const [popover, setPopover] = useState<{ status: string; bucketIdx: number } | null>(null)
 
-  const pipelineDeals = projects.filter(d => PIPELINE_STATUSES.includes(d.status))
+  const pipelineDeals = useMemo(
+    () => projects.filter(d => PIPELINE_STATUSES.includes(d.status)),
+    [projects],
+  )
+
+  const grid = useMemo(
+    () => PIPELINE_COLS.map(col => ({
+      col,
+      buckets: BUCKETS.map((b, bi) => ({
+        bi,
+        deals: pipelineDeals.filter(d =>
+          d.status === col.status &&
+          d.daysInCurrentStage >= b.min &&
+          d.daysInCurrentStage < b.max
+        ),
+      })),
+    })),
+    [pipelineDeals],
+  )
 
   if (pipelineDeals.length === 0) {
     return (
@@ -52,15 +70,7 @@ export function StaleHeatmap({ projects, onDealClick }: Props) {
     )
   }
 
-  function getDeals(status: string, bucketIdx: number): Project[] {
-    const b = BUCKETS[bucketIdx]
-    return pipelineDeals.filter(
-      d => d.status === status && d.daysInCurrentStage >= b.min && d.daysInCurrentStage < b.max
-    )
-  }
-
-  function handleCellClick(status: string, bucketIdx: number) {
-    const deals = getDeals(status, bucketIdx)
+  function handleCellClick(deals: Project[], status: string, bucketIdx: number) {
     if (deals.length === 0) return
     if (deals.length === 1) {
       onDealClick?.(deals[0])
@@ -98,7 +108,7 @@ export function StaleHeatmap({ projects, onDealClick }: Props) {
           <div key={b.label} style={headerStyle}>{b.label}</div>
         ))}
 
-        {PIPELINE_COLS.map(col => (
+        {grid.map(({ col, buckets }) => (
           <>
             <div
               key={`label-${col.status}`}
@@ -122,8 +132,7 @@ export function StaleHeatmap({ projects, onDealClick }: Props) {
               {col.label}
             </div>
 
-            {BUCKETS.map((_, bi) => {
-              const deals = getDeals(col.status, bi)
+            {buckets.map(({ bi, deals }) => {
               const count = deals.length
               const isOpen = popover?.status === col.status && popover.bucketIdx === bi
 
@@ -133,7 +142,7 @@ export function StaleHeatmap({ projects, onDealClick }: Props) {
                   style={{ position: 'relative' }}
                 >
                   <div
-                    onClick={() => handleCellClick(col.status, bi)}
+                    onClick={() => handleCellClick(deals, col.status, bi)}
                     style={{
                       minWidth: 70,
                       minHeight: 50,
@@ -167,7 +176,7 @@ export function StaleHeatmap({ projects, onDealClick }: Props) {
                       boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
                       marginTop: 4,
                     }}>
-                      {getDeals(col.status, bi).map(deal => (
+                      {deals.map(deal => (
                         <div
                           key={deal.id}
                           onClick={() => {

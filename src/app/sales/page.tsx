@@ -31,6 +31,12 @@ interface SalesIssue { level: IssueLevel; source: 'projects' | 'clients'; entity
 const THEME_ICONS = { auto: Monitor, dark: Moon, light: Sun } as const
 const LEVEL_ORDER: Record<IssueLevel, number> = { critical: 0, warning: 1, info: 2 }
 
+const INPUT_STYLE: React.CSSProperties = {
+  background: 'var(--bg-input)', border: '1px solid var(--border-input)',
+  borderRadius: 'var(--radius-input)', padding: '5px 10px',
+  fontSize: 'var(--fs-xs)', color: 'var(--text-primary)',
+}
+
 const BG_IMAGES = [
   '/assets/backgrounds/bg-ice-surface-light.jpg',
   '/assets/backgrounds/bg-sediment-blue-white.jpg',
@@ -112,15 +118,30 @@ export default function SalesPage() {
   const kpiWinRate = useMemo(() => {
     const cutoff = new Date()
     cutoff.setDate(cutoff.getDate() - 90)
-    const recent = localProjects.filter(p => new Date(p.created) >= cutoff)
-    const won = recent.filter(p => CLOSED_WON.has(p.status)).length
-    const lost = recent.filter(p => CLOSED_LOST.has(p.status)).length
+    const { won, lost } = localProjects.reduce(
+      (acc, p) => {
+        if (new Date(p.created) < cutoff) return acc
+        if (CLOSED_WON.has(p.status)) acc.won++
+        else if (CLOSED_LOST.has(p.status)) acc.lost++
+        return acc
+      },
+      { won: 0, lost: 0 },
+    )
     return won + lost > 0 ? Math.round(won / (won + lost) * 100) : 0
   }, [localProjects])
 
   const ownerOptions = useMemo(() => {
     const s = new Set(localProjects.map(p => p.ownerName).filter(Boolean))
     return Array.from(s).sort()
+  }, [localProjects])
+
+  const activeDealsMap = useMemo(() => {
+    const map = new Map<string, number>()
+    localProjects.forEach(p => {
+      if (CLOSED_WON.has(p.status) || CLOSED_LOST.has(p.status)) return
+      p.clientIds.forEach(id => map.set(id, (map.get(id) || 0) + 1))
+    })
+    return map
   }, [localProjects])
 
   // ── Client data ───────────────────────────────────────────────────────────
@@ -132,31 +153,17 @@ export default function SalesPage() {
   }, [clients])
 
   const filteredClients = useMemo(() => {
-    let list = [...clients]
-    if (clientSectorFilter) list = list.filter(c => c.sectors.includes(clientSectorFilter))
-    if (clientSatisfactionFilter) list = list.filter(c => c.satisfaction === clientSatisfactionFilter)
-    if (clientHealthFilter) list = list.filter(c => c.health.includes(clientHealthFilter))
-    if (clientUpsellFilter) list = list.filter(c => c.upXsellPotential === clientUpsellFilter)
-    if (clientSort === 'ltv') list.sort((a, b) => b.lifetimeValue - a.lifetimeValue)
-    if (clientSort === 'projects') {
-      list.sort((a, b) => {
-        const aCount = localProjects.filter((p: Project) => p.clientIds.some((id: string) => id === a.id) && !CLOSED_WON.has(p.status) && !CLOSED_LOST.has(p.status)).length
-        const bCount = localProjects.filter((p: Project) => p.clientIds.some((id: string) => id === b.id) && !CLOSED_WON.has(p.status) && !CLOSED_LOST.has(p.status)).length
-        return bCount - aCount
-      })
-    }
+    const list = clients.filter(c => {
+      if (clientSectorFilter && !c.sectors.includes(clientSectorFilter)) return false
+      if (clientSatisfactionFilter && c.satisfaction !== clientSatisfactionFilter) return false
+      if (clientHealthFilter && !c.health.includes(clientHealthFilter)) return false
+      if (clientUpsellFilter && c.upXsellPotential !== clientUpsellFilter) return false
+      return true
+    })
+    if (clientSort === 'ltv') return [...list].sort((a, b) => b.lifetimeValue - a.lifetimeValue)
+    if (clientSort === 'projects') return [...list].sort((a, b) => (activeDealsMap.get(b.id) || 0) - (activeDealsMap.get(a.id) || 0))
     return list
-  }, [clients, clientSectorFilter, clientSatisfactionFilter, clientHealthFilter, clientUpsellFilter, clientSort, localProjects])
-
-  function activeDealsForClient(clientId: string): number {
-    return localProjects.filter(p => p.clientIds.includes(clientId) && !CLOSED_WON.has(p.status) && !CLOSED_LOST.has(p.status)).length
-  }
-
-  const inputStyle: React.CSSProperties = {
-    background: 'var(--bg-input)', border: '1px solid var(--border-input)',
-    borderRadius: 'var(--radius-input)', padding: '5px 10px',
-    fontSize: 'var(--fs-xs)', color: 'var(--text-primary)',
-  }
+  }, [clients, clientSectorFilter, clientSatisfactionFilter, clientHealthFilter, clientUpsellFilter, clientSort, activeDealsMap])
 
   // ── Loading / Error ────────────────────────────────────────────────────────
 
@@ -223,7 +230,7 @@ export default function SalesPage() {
         ))}
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, paddingRight: 4 }}>
-          <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)} style={{ ...inputStyle }}>
+          <select value={ownerFilter} onChange={e => setOwnerFilter(e.target.value)} style={{ ...INPUT_STYLE }}>
             <option value="">Tous les owners</option>
             {ownerOptions.map(o => <option key={o} value={o}>{o}</option>)}
           </select>
@@ -330,21 +337,21 @@ export default function SalesPage() {
           <div>
             {/* Filters */}
             <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
-              <select value={clientSectorFilter} onChange={e => setClientSectorFilter(e.target.value)} style={{ ...inputStyle, padding: '6px 10px' }}>
+              <select value={clientSectorFilter} onChange={e => setClientSectorFilter(e.target.value)} style={{ ...INPUT_STYLE, padding: '6px 10px' }}>
                 <option value="">Tous les secteurs</option>
                 {allSectors.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
-              <select value={clientSatisfactionFilter} onChange={e => setClientSatisfactionFilter(e.target.value)} style={{ ...inputStyle, padding: '6px 10px' }}>
+              <select value={clientSatisfactionFilter} onChange={e => setClientSatisfactionFilter(e.target.value)} style={{ ...INPUT_STYLE, padding: '6px 10px' }}>
                 <option value="">Satisfaction</option>
                 {['Very Satisfied', 'Satisfied', 'Neutral', 'Dissatisfied'].map(s => <option key={s} value={s}>{s}</option>)}
               </select>
-              <select value={clientHealthFilter} onChange={e => setClientHealthFilter(e.target.value)} style={{ ...inputStyle, padding: '6px 10px' }}>
+              <select value={clientHealthFilter} onChange={e => setClientHealthFilter(e.target.value)} style={{ ...INPUT_STYLE, padding: '6px 10px' }}>
                 <option value="">Health</option>
                 <option value="OK">✅ OK</option>
                 <option value="Warning">⚠️ Warning</option>
                 <option value="Critical">❌ Critical</option>
               </select>
-              <select value={clientUpsellFilter} onChange={e => setClientUpsellFilter(e.target.value)} style={{ ...inputStyle, padding: '6px 10px' }}>
+              <select value={clientUpsellFilter} onChange={e => setClientUpsellFilter(e.target.value)} style={{ ...INPUT_STYLE, padding: '6px 10px' }}>
                 <option value="">Up-sell</option>
                 {['High', 'Medium', 'Low'].map(s => <option key={s} value={s}>{s}</option>)}
               </select>
@@ -369,7 +376,7 @@ export default function SalesPage() {
                 <ClientCard
                   key={client.id}
                   client={client}
-                  activeDealsCount={activeDealsForClient(client.id)}
+                  activeDealsCount={activeDealsMap.get(client.id) || 0}
                   onClick={() => setSelectedClient(client)}
                 />
               ))}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import {
   ResponsiveContainer,
   BarChart, Bar,
@@ -87,6 +87,11 @@ function buildData(projects: Project[], mode: WeightMode): { months: MonthDatum[
   return { months, types }
 }
 
+const AXIS_TICK_STYLE = { fill: 'var(--text-muted)', fontSize: 11 }
+function legendFormatter(v: string) {
+  return <span style={{ color: 'var(--text-secondary)' }}>{v}</span>
+}
+
 // ── Ctrl button ─────────────────────────────────────────────────────────────
 
 function Btn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -165,21 +170,21 @@ export function ForecastChart({ projects }: ForecastChartProps) {
     [projects, weightMode],
   )
 
+  const tooltipContent = useCallback(
+    (p: { active?: boolean; payload?: unknown; label?: unknown }) => (
+      <ForecastTooltip
+        active={p.active}
+        payload={p.payload as TooltipEntry[]}
+        label={p.label as string}
+        allData={months}
+      />
+    ),
+    [months],
+  )
+
   if (projects.length === 0) {
     return <div style={{ width: '100%', height: 320, borderRadius: 8, background: 'var(--bg-page)', opacity: 0.5 }} />
   }
-
-  const tooltipContent = (p: { active?: boolean; payload?: unknown; label?: unknown }) => (
-    <ForecastTooltip
-      active={p.active}
-      payload={p.payload as TooltipEntry[]}
-      label={p.label as string}
-      allData={months}
-    />
-  )
-
-  const sharedAxisStyle = { fill: 'var(--text-muted)', fontSize: 11 }
-  const legendFormatter = (v: string) => <span style={{ color: 'var(--text-secondary)' }}>{v}</span>
 
   return (
     <div style={{ width: '100%' }}>
@@ -212,8 +217,8 @@ export function ForecastChart({ projects }: ForecastChartProps) {
         {chartType === 'line' ? (
           <LineChart data={months} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-            <XAxis dataKey="label" tick={sharedAxisStyle} axisLine={false} tickLine={false} />
-            <YAxis tick={sharedAxisStyle} axisLine={false} tickLine={false} tickFormatter={v => fmtCurrency(v as number)} width={68} />
+            <XAxis dataKey="label" tick={AXIS_TICK_STYLE} axisLine={false} tickLine={false} />
+            <YAxis tick={AXIS_TICK_STYLE} axisLine={false} tickLine={false} tickFormatter={v => fmtCurrency(v as number)} width={68} />
             <Tooltip content={tooltipContent} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
             <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} formatter={legendFormatter} />
             {types.map(t => (
@@ -232,8 +237,8 @@ export function ForecastChart({ projects }: ForecastChartProps) {
         ) : (
           <BarChart data={months} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
-            <XAxis dataKey="label" tick={sharedAxisStyle} axisLine={false} tickLine={false} />
-            <YAxis tick={sharedAxisStyle} axisLine={false} tickLine={false} tickFormatter={v => fmtCurrency(v as number)} width={68} />
+            <XAxis dataKey="label" tick={AXIS_TICK_STYLE} axisLine={false} tickLine={false} />
+            <YAxis tick={AXIS_TICK_STYLE} axisLine={false} tickLine={false} tickFormatter={v => fmtCurrency(v as number)} width={68} />
             <Tooltip content={tooltipContent} cursor={{ fill: 'rgba(255,255,255,0.04)' }} />
             <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} formatter={legendFormatter} />
             {types.map((t, i) => (
