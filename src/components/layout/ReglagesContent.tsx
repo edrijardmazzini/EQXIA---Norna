@@ -5,6 +5,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceDot,
 } from 'recharts'
 import { Database, ExternalLink } from 'lucide-react'
+import { DEFAULT_LOADING_TEXTS, LOADING_WORDS_KEY } from '@/components/eqxia/EqxiaLoadingScreen'
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -138,6 +139,23 @@ export function ReglagesContent() {
   const updateSetting = useCallback(<K extends keyof Settings>(key: K, value: Settings[K]) => {
     setSettings(prev => { const next = { ...prev, [key]: value }; saveSettings(next); return next })
   }, [])
+
+  // ─── Mots de chargement ───────────────────────────────────────────────────
+  const [loadingWords, setLoadingWords] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return DEFAULT_LOADING_TEXTS
+    try {
+      const raw = localStorage.getItem(LOADING_WORDS_KEY)
+      if (!raw) return [...DEFAULT_LOADING_TEXTS]
+      const parsed = JSON.parse(raw) as unknown
+      return Array.isArray(parsed) && parsed.length > 0 ? (parsed as string[]) : [...DEFAULT_LOADING_TEXTS]
+    } catch { return [...DEFAULT_LOADING_TEXTS] }
+  })
+  const [newWord, setNewWord] = useState('')
+
+  function saveWords(words: string[]) {
+    setLoadingWords(words)
+    try { localStorage.setItem(LOADING_WORDS_KEY, JSON.stringify(words)) } catch { /* ignore */ }
+  }
 
   const [projects, setProjects] = useState<Project[]>([])
   const [projectsLoading, setProjectsLoading] = useState(true)
@@ -394,14 +412,55 @@ export function ReglagesContent() {
         </div>
       </Section>
 
-      <details style={{ opacity: 0.45, marginTop: 8 }}>
+      <details style={{ opacity: 0.5, marginTop: 8 }}>
         <summary style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span>▸</span> mots de chargement
+          <span style={{ fontSize: 9 }}>▸</span>
+          mots de chargement
+          <span style={{ marginLeft: 'auto', fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)' }}>{loadingWords.length} mots</span>
         </summary>
-        <div style={{ marginTop: 6, padding: '8px 12px', background: 'var(--bg-input)', borderRadius: 6, border: '1px solid var(--border-subtle)', display: 'flex', flexWrap: 'wrap', gap: '4px 10px' }}>
-          {['Julienning','Alexing','Govining','Pierreling','Patening','Guillosesting','Drijaring','Mazzining','Roding','Eqxing','Kiting','Bumble-Beeing','Megatroning','Moonloying','Pragmacticing','Beavering','Slash-compacting','Emiling','Sasching','Fiaking','BodIAbuilding'].map(w => (
-            <span key={w} style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{w}…</span>
-          ))}
+        <div style={{ marginTop: 8, padding: '10px 12px', background: 'var(--bg-input)', borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
+          {/* Tags éditables */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 6px', marginBottom: 10 }}>
+            {loadingWords.map((w, i) => (
+              <span key={i} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+                borderRadius: 4, padding: '2px 6px', fontSize: 'var(--fs-2xs)', fontFamily: 'monospace',
+                color: 'var(--text-secondary)',
+              }}>
+                {w}…
+                <button
+                  onClick={() => saveWords(loadingWords.filter((_, j) => j !== i))}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 10, padding: 0, lineHeight: 1, display: 'flex', alignItems: 'center' }}
+                  title="Supprimer"
+                >×</button>
+              </span>
+            ))}
+          </div>
+          {/* Ajout */}
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <input
+              value={newWord}
+              onChange={e => setNewWord(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && newWord.trim()) {
+                  saveWords([...loadingWords, newWord.trim()])
+                  setNewWord('')
+                }
+              }}
+              placeholder="Nouveau mot…"
+              style={{ flex: 1, fontSize: 'var(--fs-2xs)', background: 'var(--bg-page)', border: '1px solid var(--border-input)', borderRadius: 4, color: 'var(--text-primary)', padding: '4px 8px', fontFamily: 'inherit', outline: 'none' }}
+            />
+            <button
+              onClick={() => { if (newWord.trim()) { saveWords([...loadingWords, newWord.trim()]); setNewWord('') } }}
+              style={{ fontSize: 'var(--fs-2xs)', background: 'var(--accent-soft)', border: '1px solid var(--border-accent)', color: 'var(--accent)', borderRadius: 4, padding: '4px 10px', cursor: 'pointer', fontFamily: 'inherit' }}
+            >+ Ajouter</button>
+            <button
+              onClick={() => saveWords([...DEFAULT_LOADING_TEXTS])}
+              style={{ fontSize: 'var(--fs-2xs)', background: 'none', border: '1px solid var(--border-subtle)', color: 'var(--text-muted)', borderRadius: 4, padding: '4px 8px', cursor: 'pointer', fontFamily: 'inherit' }}
+              title="Réinitialiser aux mots par défaut"
+            >Réinitialiser</button>
+          </div>
         </div>
       </details>
     </div>

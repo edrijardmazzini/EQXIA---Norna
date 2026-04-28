@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 
-const LOADING_TEXTS = [
+export const DEFAULT_LOADING_TEXTS = [
   'Julienning', 'Alexing', 'Govining', 'Pierreling', 'Patening',
   'Guillosesting', 'Drijaring', 'Mazzining', 'Roding', 'Eqxing',
   'Kiting', 'Bumble-Beeing', 'Megatroning', 'Moonloying', 'Pragmacticing',
@@ -9,25 +9,38 @@ const LOADING_TEXTS = [
   'BodIAbuilding',
 ]
 
+export const LOADING_WORDS_KEY = 'eqxia-loading-words'
+
+function getActiveWords(): string[] {
+  if (typeof window === 'undefined') return DEFAULT_LOADING_TEXTS
+  try {
+    const raw = localStorage.getItem(LOADING_WORDS_KEY)
+    if (!raw) return DEFAULT_LOADING_TEXTS
+    const parsed = JSON.parse(raw) as unknown
+    return Array.isArray(parsed) && parsed.length > 0 ? (parsed as string[]) : DEFAULT_LOADING_TEXTS
+  } catch { return DEFAULT_LOADING_TEXTS }
+}
+
 interface EqxiaLoadingScreenProps {
   appName?: string
   bgImage?: string
 }
 
 export function EqxiaLoadingScreen({ appName, bgImage }: EqxiaLoadingScreenProps) {
-  const [idx, setIdx] = useState(() => Math.floor(Math.random() * LOADING_TEXTS.length))
+  const [words] = useState<string[]>(getActiveWords)
+  const [idx, setIdx] = useState(() => Math.floor(Math.random() * getActiveWords().length))
   const [visible, setVisible] = useState(true)
 
   useEffect(() => {
     const id = setInterval(() => {
       setVisible(false)
       setTimeout(() => {
-        setIdx(i => (i + 1) % LOADING_TEXTS.length)
+        setIdx(i => (i + 1) % words.length)
         setVisible(true)
       }, 150)
     }, 900)
     return () => clearInterval(id)
-  }, [])
+  }, [words.length])
 
   return (
     <div style={{
@@ -91,7 +104,7 @@ export function EqxiaLoadingScreen({ appName, bgImage }: EqxiaLoadingScreenProps
           minWidth: 260,
           userSelect: 'none',
         }}>
-          {LOADING_TEXTS[idx]}&hellip;
+          {words[idx]}&hellip;
         </div>
       </div>
     </div>

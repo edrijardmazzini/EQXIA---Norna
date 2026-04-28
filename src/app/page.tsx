@@ -1878,12 +1878,12 @@ export default function DashboardPage() {
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
                           <thead style={{ position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 2 }}>
                             <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
-                              {["Date", "Description", "Fournisseur", "Catégorie", "Montant", "MUR", ""].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                              {["Date", "Description", "Fournisseur", "Catégorie", "Montant", "MUR"].map(h => <th key={h} style={thStyle}>{h}</th>)}
                             </tr>
                           </thead>
                           <tbody>
                             {listItems.length === 0 ? (
-                              <tr><td colSpan={7} style={{ textAlign: "center", padding: 32, color: "var(--text-muted)", fontStyle: "italic" }}>Aucune dépense pour ce filtre</td></tr>
+                              <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--text-muted)", fontStyle: "italic" }}>Aucune dépense pour ce filtre</td></tr>
                             ) : listItems.map((d, i) => {
                               const c = (d.categorie && depCategoryColors[d.categorie]) || "#6b7280"
                               return (
@@ -1898,7 +1898,6 @@ export default function DashboardPage() {
                                   </td>
                                   <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 600 }}>{d.montant.toLocaleString("fr-FR")} {d.devise}</td>
                                   <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "#ef4444" }}>{Math.round(d.montantMUR).toLocaleString("fr-FR")}</td>
-                                  <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'depense', data: d as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                                 </tr>
                               )
                             })}
@@ -2151,7 +2150,7 @@ export default function DashboardPage() {
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
                           <thead style={{ position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 2 }}>
                             <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
-                              {["Date", "Projet", "Client", "Type", "Status", "Montant", "MUR", ""].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                              {["Date", "Projet", "Client", "Type", "Status", "Montant", "MUR"].map(h => <th key={h} style={thStyle}>{h}</th>)}
                             </tr>
                           </thead>
                           <tbody>
@@ -2172,7 +2171,6 @@ export default function DashboardPage() {
                                   <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status}</td>
                                   <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 600 }}>{Math.round(getRevenueRaw(p)).toLocaleString("fr-FR")} {p.currency}</td>
                                   <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "var(--accent)" }}>{Math.round(getRevenueMUR(p)).toLocaleString("fr-FR")}</td>
-                                  <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'project', data: p as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                                 </tr>
                               )
                             })}
@@ -2426,7 +2424,7 @@ export default function DashboardPage() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
                   <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--bg-panel)" }}>
                     <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
-                      {["Date", "Description", "Fournisseur", "Montant", "Catégorie", ""].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                      {["Date", "Description", "Fournisseur", "Montant", "Catégorie"].map(h => <th key={h} style={thStyle}>{h}</th>)}
                     </tr>
                     <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.12)" }}>
                       <th style={filterCellStyle}>
@@ -2444,7 +2442,6 @@ export default function DashboardPage() {
                           {CATEGORIE_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </th>
-                      <th style={filterCellStyle} />
                     </tr>
                   </thead>
                   <tbody>{filteredDep.map((d, i) => (
@@ -2454,7 +2451,6 @@ export default function DashboardPage() {
                       <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{d.fournisseur}</td>
                       <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace" }}>{d.montant.toLocaleString("fr-FR")} {d.devise}</td>
                       <td style={tdStyle}>{d.categorie ? (() => { const c = depCategoryColors[d.categorie] || "#6b7280"; return <span style={{ background: `${c}22`, color: c, padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{d.categorie}</span> })() : "—"}</td>
-                      <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'depense', data: d as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -2462,7 +2458,7 @@ export default function DashboardPage() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
                   <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--bg-panel)" }}>
                     <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
-                      {["Date", "Projet", "Client", "Montant", "Type", "Status", ""].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                      {["Date", "Projet", "Client", "Montant", "Type", "Status"].map(h => <th key={h} style={thStyle}>{h}</th>)}
                     </tr>
                     <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.12)" }}>
                       <th style={filterCellStyle}>
@@ -2496,7 +2492,6 @@ export default function DashboardPage() {
                       <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace" }}>{Math.round(getRevenueRaw(p)).toLocaleString("fr-FR")} {p.currency}</td>
                       <td style={tdStyle}>{p.type ? (() => { const c = projectTypeColors[p.type] || "#A6C9CE"; return <span style={{ background: `${c}22`, color: c, padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{p.type}</span> })() : "—"}</td>
                       <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{p.status}</td>
-                      <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'project', data: p as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -2721,7 +2716,6 @@ export default function DashboardPage() {
                         <th style={thStyle}>Client</th>
                         <th style={thStyle}>Status</th>
                         <th style={thStyle}>Champs manquants</th>
-                        <th style={thStyle} />
                       </tr>
                     </thead>
                     <tbody>
@@ -2754,7 +2748,6 @@ export default function DashboardPage() {
                                 ))}
                               </div>
                             </td>
-                            <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'project', data: p as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                           </tr>
                         )
                       })}
@@ -2806,6 +2799,7 @@ export default function DashboardPage() {
           onClose={() => { setEditProject(null); setEditProjectMissing(undefined) }}
           onSave={handleSaveProject}
           saving={saving}
+          onEditMore={() => { const p = editProject; setEditProject(null); setEditProjectMissing(undefined); setGenericEditPl({ entity: 'project', data: p as unknown as Record<string, unknown> }) }}
         />
       )}
 
@@ -2826,6 +2820,7 @@ export default function DashboardPage() {
           onClose={() => setEditDepense(null)}
           onSave={handleSaveDepense}
           saving={saving}
+          onEditMore={() => { const d = editDepense; setEditDepense(null); setGenericEditPl({ entity: 'depense', data: d as unknown as Record<string, unknown> }) }}
         />
       )}
 
@@ -2868,7 +2863,6 @@ export default function DashboardPage() {
                       <th style={{ ...thStyle, textAlign: "right" }}>Taux</th>
                       <th style={{ ...thStyle, textAlign: "right" }}>Commission (MUR)</th>
                       <th style={thStyle}>Date fin</th>
-                      <th style={thStyle} />
                     </tr>
                   </thead>
                   <tbody>
@@ -2879,7 +2873,6 @@ export default function DashboardPage() {
                         <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace", color: "var(--text-muted)" }}>{(getCommissionRate(p) * 100).toFixed(1)} %</td>
                         <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#f97316" }}>{Math.round(getCommissionMUR(p)).toLocaleString("fr-FR")}</td>
                         <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{p.endDate || p.startDate || "—"}</td>
-                        <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'project', data: p as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -3497,9 +3490,10 @@ function ChartCard({ title, value, sub, right, children, renderExpanded, expanda
 
 // ─── Modals ───────────────────────────────────────────────────────────────────
 
-function ProjectModal({ project, clients, employees, onClose, onSave, saving, missing }: {
+function ProjectModal({ project, clients, employees, onClose, onSave, saving, missing, onEditMore }: {
   project: Project | null; clients: Client[]; employees: Employee[]; onClose: () => void; onSave: (data: any) => void; saving: boolean
-  missing?: string[] // labels des champs Critical manquants — met un ring rouge dessus
+  missing?: string[]
+  onEditMore?: () => void
 }) {
   const isNew = !project
   const [showAll, setShowAll] = useState(!missing) // Si missing défini : démarre en "essentiels"
@@ -3560,6 +3554,15 @@ function ProjectModal({ project, clients, employees, onClose, onSave, saving, mi
             >
               {showAll ? "Tous les champs ✓" : "Afficher tous les champs"}
             </button>
+            {onEditMore && !isNew && (
+              <button
+                onClick={onEditMore}
+                style={{ background: "rgba(166,201,206,0.06)", border: "1px solid var(--border-subtle)", color: "var(--text-secondary)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "4px 10px", borderRadius: 6, fontFamily: "inherit", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}
+              >
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1 5.5h9M6.5 1.5l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                Edit More
+              </button>
+            )}
             <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18 }}>✕</button>
           </div>
         </div>
@@ -3702,8 +3705,9 @@ function ProjectModal({ project, clients, employees, onClose, onSave, saving, mi
   )
 }
 
-function DepenseModal({ depense, onClose, onSave, saving }: {
+function DepenseModal({ depense, onClose, onSave, saving, onEditMore }: {
   depense: Depense; onClose: () => void; onSave: (data: any) => void; saving: boolean
+  onEditMore?: () => void
 }) {
   const [form, setForm] = useState({
     description: depense.description,
@@ -3729,7 +3733,18 @@ function DepenseModal({ depense, onClose, onSave, saving }: {
       <div style={modalBox} onClick={e => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "var(--text-primary)" }}>Modifier la dépense</div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18 }}>✕</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {onEditMore && (
+              <button
+                onClick={onEditMore}
+                style={{ background: "rgba(166,201,206,0.06)", border: "1px solid var(--border-subtle)", color: "var(--text-secondary)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "4px 10px", borderRadius: 6, fontFamily: "inherit", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}
+              >
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1 5.5h9M6.5 1.5l4 4-4 4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                Edit More
+              </button>
+            )}
+            <button onClick={onClose} style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", fontSize: 18 }}>✕</button>
+          </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
