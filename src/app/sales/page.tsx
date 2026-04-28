@@ -516,6 +516,47 @@ function SalesSettings({ projects, clients }: { projects: Project[]; clients: Cl
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
+      {/* Documentation des méthodes de calcul */}
+      <div style={cardStyle}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Info size={15} color="var(--accent)" />
+          <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }}>Méthodes de calcul & fonctionnement</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+          {[
+            {
+              title: 'CA (Chiffre d\'affaires)',
+              body: 'Montant devisé (Quoted Amount) converti en MUR au taux en vigueur à la date choisie (End Date par défaut, configurable dans /réglages). Si non renseigné, le projet est exclu du CA.',
+            },
+            {
+              title: 'Revenu net',
+              body: 'Final Amount si renseigné, sinon Quoted Amount. On soustrait ensuite la commission éventuelle (commission % × CA). Résultat = revenu réellement encaissé par Eqxia.',
+            },
+            {
+              title: 'Win % gut feeling',
+              body: 'Valeur saisie manuellement dans Notion (0–100 %). Reflète l\'intuition commerciale. Utilisé par défaut pour pondérer les projections prévisionnelles.',
+            },
+            {
+              title: 'Win % auto',
+              body: 'Score calculé par une formule Notion combinant : statut (Scoping +15, Proposal +20, Verbal +30…), budget confirmé (+10), date clôture renseignée (+5), etc. Fallback quand gut feeling = 0.',
+            },
+            {
+              title: 'Prévisionnel (forecast)',
+              body: 'Les projets non terminés (hors Won/Lost/Cancelled) sont placés sur leur Expected Close Date. Si absente, ils tombent à currentMonth +3. Le montant est pondéré par le win % sélectionné.',
+            },
+            {
+              title: 'Health & Kanban',
+              body: 'Health = formule Notion (❌ Critical, ⚠️ Warning, ✅ OK) basée sur les jours dans l\'étape et les champs manquants. Le Kanban groupe par statut et permet de déplacer un deal d\'une colonne à l\'autre (PATCH Notion).',
+            },
+          ].map((item, i) => (
+            <div key={item.title} style={{ padding: '14px 20px', borderRight: i % 2 === 0 ? '1px solid var(--border-subtle)' : undefined, borderTop: i >= 2 ? '1px solid var(--border-subtle)' : undefined }}>
+              <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 700, color: 'var(--accent)', marginBottom: 6 }}>{item.title}</div>
+              <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', lineHeight: 1.55 }}>{item.body}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Bases Notion */}
       <div style={cardStyle}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 8 }}>

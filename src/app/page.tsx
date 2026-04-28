@@ -385,6 +385,15 @@ const SATISFACTION_OPTIONS = ["Very Satisfied", "Satisfied", "Neutral", "Unsatis
 const CATEGORIE_OPTIONS = Object.keys(CAT_COLORS)
 const DEVISE_OPTIONS = ["MUR", "EUR", "USD", "GBP"]
 
+function downloadCSV(filename: string, headers: string[], rows: string[][]) {
+  const bom = '﻿'
+  const content = bom + [headers, ...rows].map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\n')
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a'); a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
@@ -461,6 +470,9 @@ export default function DashboardPage() {
   const [revFsFilterMois, setRevFsFilterMois] = useState<string>("")
   const [depFsFilterMois, setDepFsFilterMois] = useState<string>("")
   const [topDetailItem, setTopDetailItem] = useState<{ mode: "clients" | "fournisseurs"; name: string } | null>(null)
+  const [revByEmployee, setRevByEmployee] = useState(false)
+  const [depByEmployee, setDepByEmployee] = useState(false)
+  const [showExportModal, setShowExportModal] = useState(false)
 
   const currentRevMois = hoverRevMois
   const currentDepMois = hoverDepMois
@@ -978,6 +990,41 @@ export default function DashboardPage() {
     const nbPast = revChartRange.filled.filter(c => c <= currentDossier).length
     return { nbFuture, nbPast, total: revChartRange.filled.length }
   }, [revChartRange, currentDossier])
+
+  const projParEmployeeData = useMemo(() => {
+    const m: Record<string, { count: number; amount: number; amountProjected: number; countProjected: number }> = {}
+    projects.forEach(p => {
+      const t = p.type || "N/A"
+      if (t === "Internal" || t === "N/A") return
+      const r = computeProjectRevenue(p)
+      if (!r) return
+      if (!revChartRange.filled.includes(r.dossier)) return
+      const emp = p.ownerName || "—"
+      if (!m[emp]) m[emp] = { count: 0, amount: 0, amountProjected: 0, countProjected: 0 }
+      const isFuture = r.dossier > currentDossier
+      const amt = r.netMUR
+      if (isFuture) { m[emp].amountProjected += amt; m[emp].countProjected++ }
+      else { m[emp].amount += amt; m[emp].count++ }
+    })
+    return Object.entries(m).map(([name, v]) => ({
+      name, count: v.count + v.countProjected, amount: v.amount + v.amountProjected,
+      realAmount: v.amount, projectedAmount: v.amountProjected, realCount: v.count, projectedCount: v.countProjected,
+    })).sort((a, b) => b.amount - a.amount)
+  }, [projects, revChartRange, currentDossier])
+
+  const depParPayeParData = useMemo(() => {
+    const m: Record<string, number> = {}
+    const existing = [...new Set(depenses.map(d => d.dossier).filter(Boolean))]
+    const codes = buildMonthCodes(depViewMode, depViewPast, depViewFuture, depViewCustomStart, depViewCustomEnd, existing)
+    for (const code of codes) {
+      if (code > currentDossier) continue
+      depenses.filter(d => d.dossier === code).forEach(d => {
+        const emp = d.payePar || "—"
+        m[emp] = (m[emp] || 0) + d.montantMUR
+      })
+    }
+    return Object.entries(m).map(([name, value]) => ({ name, value, projected: 0 })).sort((a, b) => b.value - a.value)
+  }, [depenses, depViewMode, depViewPast, depViewFuture, depViewCustomStart, depViewCustomEnd, currentDossier, buildMonthCodes])
 
   // ISO YYYY-MM-DD du jour — borne pour les Tops "passé uniquement".
   const todayISO = new Date().toISOString().slice(0, 10)
@@ -1539,6 +1586,13 @@ export default function DashboardPage() {
                   </a>
                 )
               })()}
+              <button
+                onClick={() => setShowExportModal(true)}
+                style={{ fontSize: "var(--fs-xs)", color: "var(--text-muted)", padding: "4px 10px", borderRadius: "var(--radius-btn)", border: "1px solid var(--border-subtle)", background: "var(--bg-card)", whiteSpace: "nowrap", cursor: "pointer", fontFamily: "inherit" }}
+                title="Exporter les données CSV"
+              >
+                ↓ Export
+              </button>
               <SignOutButton />
             </div>
           }
@@ -1908,15 +1962,22 @@ export default function DashboardPage() {
               })()}
               expandable
               expandMode="tall"
+              right={
+                <button
+                  onClick={() => setDepByEmployee(v => !v)}
+                  style={{ background: depByEmployee ? "var(--accent-soft)" : "none", border: `1px solid ${depByEmployee ? "var(--accent)" : "var(--border-subtle)"}`, borderRadius: 6, color: depByEmployee ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "4px 8px", fontFamily: "inherit", whiteSpace: "nowrap" }}
+                >Par employé</button>
+              }
               renderExpanded={() => {
-                const realT = depParCat.filter((d: any) => !d.projected).reduce((s, d) => s + d.value, 0)
-                const projT = depParCat.filter((d: any) => d.projected).reduce((s, d) => s + d.value, 0)
+                const activeData = depByEmployee ? depParPayeParData : depParCat
+                const realT = activeData.filter((d: any) => !d.projected).reduce((s, d) => s + d.value, 0)
+                const projT = activeData.filter((d: any) => d.projected).reduce((s, d) => s + d.value, 0)
                 return (
                   <BigPie
-                    data={depParCat}
-                    colors={depParCat.map((d: any, i) => d.projected ? "#ef4444" : PIE_CAT[i % PIE_CAT.length])}
+                    data={activeData}
+                    colors={activeData.map((d: any, i) => d.projected ? "#ef4444" : PIE_CAT[i % PIE_CAT.length])}
                     total={realT + projT}
-                    totalLabel="Dépenses totales"
+                    totalLabel={depByEmployee ? "Dépenses par employé" : "Dépenses totales"}
                     formatter={v => `${Math.round(v).toLocaleString("fr-FR")} MUR`}
                     realTotal={realT}
                     projectedTotal={projT}
@@ -1924,24 +1985,30 @@ export default function DashboardPage() {
                 )
               }}
             >
-              <ResponsiveContainer width="100%" height={320}>
-                <PieChart>
-                  <Pie data={depParCat} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={2} strokeWidth={0}
-                    label={({ cx, cy, midAngle, outerRadius: or, name, value }: any) => {
-                      const pct = depTotalAll > 0 ? ((value / depTotalAll) * 100).toFixed(0) : "0"
-                      if (Number(pct) < 3) return null
-                      const R = Math.PI / 180; const cos = Math.cos(-midAngle * R); const sin = Math.sin(-midAngle * R)
-                      const mx = cx + (or + 12) * cos; const my = cy + (or + 12) * sin
-                      const ex = cx + (or + 35) * cos; const ey = cy + (or + 35) * sin
-                      const tx = ex + (cos >= 0 ? 4 : -4); const a = cos >= 0 ? "start" : "end"
-                      const sn = name.length > 16 ? name.slice(0, 14) + "…" : name
-                      return (<g><line x1={mx} y1={my} x2={ex} y2={ey} stroke="var(--text-muted)" strokeWidth={1} opacity={0.4} /><text x={tx} y={ey - 2} textAnchor={a} fill="var(--text-muted)" fontSize={9}>{sn}</text><text x={tx} y={ey + 10} textAnchor={a} fill="var(--text-primary)" fontSize={10} fontWeight={700} fontFamily="monospace">{pct}%</text></g>)
-                    }} labelLine={false}>
-                    {depParCat.map((_, i) => <Cell key={i} fill={PIE_CAT[i % PIE_CAT.length]} />)}
-                  </Pie>
-                  <Tooltip content={<CTooltip formatter={fmt} />} />
-                </PieChart>
-              </ResponsiveContainer>
+              {(() => {
+                const activeData = depByEmployee ? depParPayeParData : depParCat
+                const total = activeData.reduce((s, d) => s + d.value, 0)
+                return (
+                  <ResponsiveContainer width="100%" height={320}>
+                    <PieChart>
+                      <Pie data={activeData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={60} outerRadius={95} paddingAngle={2} strokeWidth={0}
+                        label={({ cx, cy, midAngle, outerRadius: or, name, value }: any) => {
+                          const pct = total > 0 ? ((value / total) * 100).toFixed(0) : "0"
+                          if (Number(pct) < 3) return null
+                          const R = Math.PI / 180; const cos = Math.cos(-midAngle * R); const sin = Math.sin(-midAngle * R)
+                          const mx = cx + (or + 12) * cos; const my = cy + (or + 12) * sin
+                          const ex = cx + (or + 35) * cos; const ey = cy + (or + 35) * sin
+                          const tx = ex + (cos >= 0 ? 4 : -4); const a = cos >= 0 ? "start" : "end"
+                          const sn = name.length > 16 ? name.slice(0, 14) + "…" : name
+                          return (<g><line x1={mx} y1={my} x2={ex} y2={ey} stroke="var(--text-muted)" strokeWidth={1} opacity={0.4} /><text x={tx} y={ey - 2} textAnchor={a} fill="var(--text-muted)" fontSize={9}>{sn}</text><text x={tx} y={ey + 10} textAnchor={a} fill="var(--text-primary)" fontSize={10} fontWeight={700} fontFamily="monospace">{pct}%</text></g>)
+                        }} labelLine={false}>
+                        {activeData.map((_, i) => <Cell key={i} fill={PIE_CAT[i % PIE_CAT.length]} />)}
+                      </Pie>
+                      <Tooltip content={<CTooltip formatter={fmt} />} />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )
+              })()}
             </ChartCard>
           </div>
 
@@ -2160,29 +2227,38 @@ export default function DashboardPage() {
             <ChartCard
               title="Revenus par type de projet"
               sub={(() => {
-                // "mois" est invariable au pluriel — ne pas ajouter le 's' final
                 const pluralize = (n: number, s: string) => {
                   const invariables = new Set(["mois", "fois", "pas"])
                   const suffix = invariables.has(s) || n <= 1 ? "" : "s"
                   return `${n} ${s}${suffix}`
                 }
-                if (projParTypeMeta.nbFuture > 0 && projParTypeMeta.nbPast > 0) return `Plage : ${pluralize(projParTypeMeta.nbPast, "passé")} + ${pluralize(projParTypeMeta.nbFuture, "projeté")}`
-                if (projParTypeMeta.nbFuture > 0) return `Plage : ${pluralize(projParTypeMeta.nbFuture, "mois projeté")}`
-                return `Plage : ${pluralize(projParTypeMeta.nbPast, "mois")}`
+                let base = ""
+                if (projParTypeMeta.nbFuture > 0 && projParTypeMeta.nbPast > 0) base = `Plage : ${pluralize(projParTypeMeta.nbPast, "passé")} + ${pluralize(projParTypeMeta.nbFuture, "projeté")}`
+                else if (projParTypeMeta.nbFuture > 0) base = `Plage : ${pluralize(projParTypeMeta.nbFuture, "mois projeté")}`
+                else base = `Plage : ${pluralize(projParTypeMeta.nbPast, "mois")}`
+                if (projParTypeMeta.nbFuture > 0) base += ` · ${forecastWinMode === "gut" ? "gut feeling" : "auto"}`
+                return base
               })()}
               expandable
               expandMode="tall"
+              right={
+                <button
+                  onClick={() => setRevByEmployee(v => !v)}
+                  style={{ background: revByEmployee ? "var(--accent-soft)" : "none", border: `1px solid ${revByEmployee ? "var(--accent)" : "var(--border-subtle)"}`, borderRadius: 6, color: revByEmployee ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", fontSize: "var(--fs-2xs)", padding: "4px 8px", fontFamily: "inherit", whiteSpace: "nowrap" }}
+                >Par employé</button>
+              }
               renderExpanded={() => {
-                const realT = projParTypeFiltered.reduce((s, e: any) => s + (e.realAmount || 0), 0)
-                const projT = projParTypeFiltered.reduce((s, e: any) => s + (e.projectedAmount || 0), 0)
-                const realC = projParTypeFiltered.reduce((s, e: any) => s + (e.realCount || 0), 0)
-                const projC = projParTypeFiltered.reduce((s, e: any) => s + (e.projectedCount || 0), 0)
+                const activeData = revByEmployee ? projParEmployeeData : projParTypeFiltered
+                const realT = activeData.reduce((s, e: any) => s + (e.realAmount || 0), 0)
+                const projT = activeData.reduce((s, e: any) => s + (e.projectedAmount || 0), 0)
+                const realC = activeData.reduce((s, e: any) => s + (e.realCount || 0), 0)
+                const projC = activeData.reduce((s, e: any) => s + (e.projectedCount || 0), 0)
                 return (
                   <BigPie
-                    data={projParTypeFiltered}
-                    colors={projParTypeFiltered.map((_, i) => PIE_TYPE[i % PIE_TYPE.length])}
+                    data={activeData}
+                    colors={activeData.map((_, i) => PIE_TYPE[i % PIE_TYPE.length])}
                     total={realT + projT}
-                    totalLabel="Revenus totaux"
+                    totalLabel={revByEmployee ? "Revenus par employé" : "Revenus totaux"}
                     formatter={v => `${Math.round(v).toLocaleString("fr-FR")} MUR`}
                     double
                     realTotal={realT}
@@ -2193,33 +2269,38 @@ export default function DashboardPage() {
                 )
               }}
             >
-              <div style={{ position: "relative" }}>
-                <ResponsiveContainer width="100%" height={320}>
-                  <PieChart>
-                    <Pie data={projParTypeFiltered} dataKey="amount" nameKey="name" cx="50%" cy="50%" innerRadius={72} outerRadius={100} paddingAngle={2} strokeWidth={0}
-                      label={({ cx, cy, midAngle, outerRadius: or, name, value }: any) => {
-                        const total = projParTypeFiltered.reduce((s: number, e: any) => s + e.amount, 0)
-                        const pct = total > 0 ? ((value / total) * 100).toFixed(0) : "0"
-                        if (Number(pct) < 4) return null
-                        const R = Math.PI / 180; const cos = Math.cos(-midAngle * R); const sin = Math.sin(-midAngle * R)
-                        const mx = cx + (or + 10) * cos; const my = cy + (or + 10) * sin
-                        const ex = cx + (or + 30) * cos; const ey = cy + (or + 30) * sin
-                        const tx = ex + (cos >= 0 ? 4 : -4); const a = cos >= 0 ? "start" : "end"
-                        return (<g><line x1={mx} y1={my} x2={ex} y2={ey} stroke="var(--text-muted)" strokeWidth={1} opacity={0.4} /><text x={tx} y={ey - 2} textAnchor={a} fill="var(--text-muted)" fontSize={9}>{name}</text><text x={tx} y={ey + 10} textAnchor={a} fill="var(--text-primary)" fontSize={10} fontWeight={700} fontFamily="monospace">{pct}%</text></g>)
-                      }} labelLine={false}>
-                      {projParTypeFiltered.map((_, i) => <Cell key={i} fill={PIE_TYPE[i % PIE_TYPE.length]} />)}
-                    </Pie>
-                    <Pie data={projParTypeFiltered} dataKey="count" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={65} paddingAngle={2} strokeWidth={0}>
-                      {projParTypeFiltered.map((_, i) => <Cell key={i} fill={PIE_TYPE[i % PIE_TYPE.length]} opacity={0.5} />)}
-                    </Pie>
-                    <Tooltip content={<CTooltip formatter={(v: any) => Number(v) > 100 ? `${Math.round(Number(v)).toLocaleString("fr-FR")} MUR` : `${v} projets`} />} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", textAlign: "center", pointerEvents: "none" }}>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: "var(--text-primary)", lineHeight: 1 }}>{projParTypeFiltered.reduce((s, e) => s + e.count, 0)}</div>
-                  <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 2 }}>projets</div>
-                </div>
-              </div>
+              {(() => {
+                const activeData = revByEmployee ? projParEmployeeData : projParTypeFiltered
+                return (
+                  <div style={{ position: "relative" }}>
+                    <ResponsiveContainer width="100%" height={320}>
+                      <PieChart>
+                        <Pie data={activeData} dataKey="amount" nameKey="name" cx="50%" cy="50%" innerRadius={72} outerRadius={100} paddingAngle={2} strokeWidth={0}
+                          label={({ cx, cy, midAngle, outerRadius: or, name, value }: any) => {
+                            const total = activeData.reduce((s: number, e: any) => s + e.amount, 0)
+                            const pct = total > 0 ? ((value / total) * 100).toFixed(0) : "0"
+                            if (Number(pct) < 4) return null
+                            const R = Math.PI / 180; const cos = Math.cos(-midAngle * R); const sin = Math.sin(-midAngle * R)
+                            const mx = cx + (or + 10) * cos; const my = cy + (or + 10) * sin
+                            const ex = cx + (or + 30) * cos; const ey = cy + (or + 30) * sin
+                            const tx = ex + (cos >= 0 ? 4 : -4); const a = cos >= 0 ? "start" : "end"
+                            return (<g><line x1={mx} y1={my} x2={ex} y2={ey} stroke="var(--text-muted)" strokeWidth={1} opacity={0.4} /><text x={tx} y={ey - 2} textAnchor={a} fill="var(--text-muted)" fontSize={9}>{name}</text><text x={tx} y={ey + 10} textAnchor={a} fill="var(--text-primary)" fontSize={10} fontWeight={700} fontFamily="monospace">{pct}%</text></g>)
+                          }} labelLine={false}>
+                          {activeData.map((_, i) => <Cell key={i} fill={PIE_TYPE[i % PIE_TYPE.length]} />)}
+                        </Pie>
+                        <Pie data={activeData} dataKey="count" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={65} paddingAngle={2} strokeWidth={0}>
+                          {activeData.map((_, i) => <Cell key={i} fill={PIE_TYPE[i % PIE_TYPE.length]} opacity={0.5} />)}
+                        </Pie>
+                        <Tooltip content={<CTooltip formatter={(v: any) => Number(v) > 100 ? `${Math.round(Number(v)).toLocaleString("fr-FR")} MUR` : `${v} projets`} />} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", textAlign: "center", pointerEvents: "none" }}>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: "var(--text-primary)", lineHeight: 1 }}>{activeData.reduce((s, e) => s + e.count, 0)}</div>
+                      <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 2 }}>projets</div>
+                    </div>
+                  </div>
+                )
+              })()}
             </ChartCard>
           </div>
 
@@ -2794,6 +2875,52 @@ export default function DashboardPage() {
           </div>
         )
       })()}
+
+      {showExportModal && (
+        <>
+          <div onClick={() => setShowExportModal(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 1199 }} />
+          <div onClick={e => e.stopPropagation()} style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%,-50%)", zIndex: 1200, background: "var(--bg-card)", border: "1px solid var(--border-subtle)", borderRadius: 10, width: 420, padding: 24, boxShadow: "0 12px 40px rgba(0,0,0,0.5)" }}>
+            <div style={{ fontSize: "var(--fs-md)", fontWeight: 700, color: "var(--text-primary)", marginBottom: 20 }}>Exporter les données CSV</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[
+                {
+                  label: "Projets / Ventes", count: projects.length,
+                  action: () => downloadCSV(`plutus-projets-${new Date().toISOString().slice(0, 10)}.csv`,
+                    ["ID", "Nom", "Client", "Owner", "Statut", "Type", "Devise", "CA devisé", "CA final", "Net MUR", "Win %", "Win % auto", "Risque", "Début", "Fin", "Santé"],
+                    projects.map(p => [p.id, p.name, p.clientName, p.ownerName || "", p.status, p.type, p.currency, String(p.quotedAmount || 0), String(p.finalAmount || 0), String(p.netAmount || 0), String(p.winPercent || 0), String(p.winAuto || 0), p.riskLevel, p.startDate, p.endDate, p.health || ""])),
+                },
+                {
+                  label: "Dépenses", count: depenses.length,
+                  action: () => downloadCSV(`plutus-depenses-${new Date().toISOString().slice(0, 10)}.csv`,
+                    ["ID", "Description", "Fournisseur", "Catégorie", "Sous-catégorie", "Montant", "Devise", "Montant MUR", "Date", "Dossier", "Payé par"],
+                    depenses.map(d => [d.id, d.description, d.fournisseur, d.categorie, d.sousCategorie, String(d.montant || 0), d.devise, String(d.montantMUR || 0), d.date, d.dossier, d.payePar])),
+                },
+                {
+                  label: "Clients", count: clients.length,
+                  action: () => downloadCSV(`plutus-clients-${new Date().toISOString().slice(0, 10)}.csv`,
+                    ["ID", "Nom"],
+                    clients.map(c => [c.id, c.name])),
+                },
+                {
+                  label: "Employés", count: employees.length,
+                  action: () => downloadCSV(`plutus-employes-${new Date().toISOString().slice(0, 10)}.csv`,
+                    ["ID", "Nom", "Rôle", "CJE", "Pays", "Début", "Fin", "Premier salaire"],
+                    employees.map(e => [e.id, e.name, e.role, String(e.cje || 0), e.country || "", e.startDate, e.endDate, e.dateFirstSalary || ""])),
+                },
+              ].map(({ label, count, action }) => (
+                <div key={label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "var(--bg-page)", borderRadius: 6, border: "1px solid var(--border-subtle)" }}>
+                  <div>
+                    <div style={{ fontSize: "var(--fs-sm)", color: "var(--text-primary)", fontWeight: 600 }}>{label}</div>
+                    <div style={{ fontSize: "var(--fs-2xs)", color: "var(--text-muted)" }}>{count} entrée{count !== 1 ? "s" : ""}</div>
+                  </div>
+                  <button onClick={action} style={{ background: "var(--accent-soft)", border: "1px solid var(--accent)", borderRadius: 4, color: "var(--accent)", cursor: "pointer", fontSize: "var(--fs-xs)", padding: "5px 14px", fontFamily: "inherit", fontWeight: 600 }}>↓ CSV</button>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => setShowExportModal(false)} style={{ marginTop: 16, width: "100%", background: "none", border: "1px solid var(--border-subtle)", borderRadius: 6, color: "var(--text-muted)", cursor: "pointer", fontSize: "var(--fs-sm)", padding: "8px", fontFamily: "inherit" }}>Fermer</button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -4492,7 +4619,12 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
       <div style={{ position: "fixed", inset: 0, zIndex: 1000, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", WebkitBackdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24, animation: "fade-in 0.2s ease" }} onClick={() => setFullscreen(false)}>
         <div style={{ background: "var(--bg-panel)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", border: "1px solid rgba(166,201,206,0.10)", borderRadius: 14, width: "95vw", height: "92vh", overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "0 24px 80px rgba(0,0,0,0.6)" }} onClick={e => e.stopPropagation()}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
-            <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "var(--text-primary)" }}>Finance Dashboard</div>
+            <div style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: "var(--text-primary)" }}>
+              Finance Dashboard
+              {(heroMode === "future" || heroMode === "custom") && (
+                <span style={{ fontSize: "var(--fs-xs)", fontWeight: 400, color: "var(--text-muted)", marginLeft: 10 }}>({forecastWinMode === "gut" ? "gut feeling" : "auto"})</span>
+              )}
+            </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button onClick={() => setChartType(t => t === "area" ? "bar" : "area")} title={chartType === "area" ? "Vue histogramme" : "Vue courbes"} style={{ background: chartType === "bar" ? "var(--accent-soft)" : "none", border: `1px solid ${chartType === "bar" ? "var(--accent)" : "var(--border-subtle)"}`, borderRadius: 6, color: chartType === "bar" ? "var(--accent)" : "var(--text-muted)", cursor: "pointer", width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
                 {chartType === "area" ? <BarChart2 size={14} /> : <LineChart size={14} />}
@@ -4510,7 +4642,12 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
     <div style={{ background: "var(--bg-panel)", backdropFilter: "blur(16px)", WebkitBackdropFilter: "blur(16px)", border: "1px solid rgba(166,201,206,0.10)", borderRadius: 14, padding: 0, marginBottom: 24, overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)", flexWrap: "wrap", gap: 12 }}>
         <div>
-          <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>Finance Dashboard</div>
+          <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>
+            Finance Dashboard
+            {(heroMode === "future" || heroMode === "custom") && (
+              <span style={{ fontSize: "var(--fs-xs)", fontWeight: 400, color: "var(--text-muted)", marginLeft: 10 }}>({forecastWinMode === "gut" ? "gut feeling" : "auto"})</span>
+            )}
+          </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4, fontFamily: "monospace" }}>
             <span><span style={{ color: "#A6C9CE", fontWeight: 700 }}>CA gut </span><span style={{ color: "var(--text-primary)", fontWeight: 700 }}>{Math.round(totals.ca + (projected.caGut ?? projected.ca)).toLocaleString("fr-FR")}</span></span>
             <span><span style={{ color: "#7BB3BE", fontWeight: 700 }}>CA auto </span><span style={{ color: "var(--text-primary)", fontWeight: 700 }}>{Math.round(totals.ca + (projected.cAAuto ?? projected.ca)).toLocaleString("fr-FR")}</span></span>

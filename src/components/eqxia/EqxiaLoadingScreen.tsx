@@ -6,6 +6,7 @@ const LOADING_TEXTS = [
   'Guillosesting', 'Drijaring', 'Mazzining', 'Roding', 'Eqxing',
   'Kiting', 'Bumble-Beeing', 'Megatroning', 'Moonloying', 'Pragmacticing',
   'Beavering', 'Slash-compacting', 'Emiling', 'Sasching', 'Fiaking',
+  'BodIAbuilding',
 ]
 
 interface EqxiaLoadingScreenProps {
