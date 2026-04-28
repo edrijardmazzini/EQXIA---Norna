@@ -5,6 +5,7 @@ import type { Project, Client, Employee } from '@/types/sales'
 import { PIPELINE_COLS, CLOSED_WON, CLOSED_LOST, TYPE_COLORS, fmtCurrency, winFactor } from '@/types/sales'
 import { DealCard } from './DealCard'
 import { Button } from '@/components/ui/Button'
+import { GenericEditModal } from './GenericEditModal'
 
 function gutFn(p: Project): number {
   const v = p.winPercent > 1 ? p.winPercent / 100 : (p.winPercent || 0)
@@ -78,6 +79,7 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
   const [selectedDeal, setSelectedDeal] = useState<Project | null>(null)
   const [editState, setEditState] = useState<Partial<Project>>({})
   const [editSaving, setEditSaving] = useState(false)
+  const [genericEditDeal, setGenericEditDeal] = useState<Project | null>(null)
   const [lostPrompt, setLostPrompt] = useState<{ dealId: string; targetStatus: string } | null>(null)
   const [showQuickEntry, setShowQuickEntry] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -420,11 +422,33 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
             </div>
           </div>
 
-          <div style={modalActionsStyle}>
-            <Button variant="ghost" onClick={() => { setSelectedDeal(null); setEditState({}) }}>Fermer</Button>
-            <Button variant="primary" loading={editSaving} onClick={saveDealEdit} disabled={Object.keys(editState).length === 0}>Enregistrer</Button>
+          <div style={{ ...modalActionsStyle, justifyContent: 'space-between' }}>
+            <button
+              onClick={() => setGenericEditDeal(selectedDeal)}
+              style={{ fontSize: 11, color: 'var(--text-muted)', background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 4, padding: '4px 10px', cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              Edit+
+            </button>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Button variant="ghost" onClick={() => { setSelectedDeal(null); setEditState({}) }}>Fermer</Button>
+              <Button variant="primary" loading={editSaving} onClick={saveDealEdit} disabled={Object.keys(editState).length === 0}>Enregistrer</Button>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* Generic edit modal */}
+      {genericEditDeal && (
+        <GenericEditModal
+          entity="project"
+          data={genericEditDeal as unknown as Record<string, unknown>}
+          onSave={updated => {
+            onProjectsChange(projects.map(p => p.id === genericEditDeal.id ? { ...p, ...updated } : p))
+            if (selectedDeal?.id === genericEditDeal.id) setSelectedDeal(prev => prev ? { ...prev, ...updated } as Project : null)
+            setGenericEditDeal(null)
+          }}
+          onClose={() => setGenericEditDeal(null)}
+        />
       )}
 
       {/* Lost reason prompt */}

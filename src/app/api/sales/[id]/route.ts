@@ -30,6 +30,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (body.sourceLead !== undefined) properties['Source Lead'] = body.sourceLead ? { select: { name: body.sourceLead } } : { select: null }
     if (body.quotedAmount !== undefined) properties['Quoted Amount'] = { number: Number(body.quotedAmount) }
     if (body.finalAmount !== undefined) properties['Final Amount'] = { number: Number(body.finalAmount) }
+    if (body.name != null && body.name !== '') properties['Name'] = { title: [{ text: { content: String(body.name) } }] }
+    if (body.type) properties['Type'] = { select: { name: body.type } }
+    if (body.currency) properties['Currency'] = { select: { name: body.currency } }
+    if (body.startDate !== undefined) properties['Start Date'] = body.startDate ? { date: { start: body.startDate } } : { date: null }
+    if (body.endDate !== undefined) properties['End Date'] = body.endDate ? { date: { start: body.endDate } } : { date: null }
 
     const res = await fetch(`https://api.notion.com/v1/pages/${id}`, {
       method: 'PATCH',

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import type { Client, Project, Contact, Task } from '@/types/sales'
 import { fmtCurrency, fmtDate, PIPELINE_COLS, CLOSED_WON } from '@/types/sales'
+import { GenericEditModal } from './GenericEditModal'
 
 // ── Style constants ────────────────────────────────────────────────────────
 
@@ -281,6 +282,7 @@ export function ClientDetail({ client, projects, onClose, inline = false }: Clie
   const [editProjectId, setEditProjectId] = useState<string | null>(null)
   const [editHistoryId, setEditHistoryId] = useState<string | null>(null)
   const [localHistory, setLocalHistory] = useState<Project[]>(closedDeals)
+  const [genericEdit, setGenericEdit] = useState<{ entity: 'project' | 'contact' | 'task'; data: Record<string, unknown> } | null>(null)
 
   useEffect(() => {
     setLocalDeals(activeDeals)
@@ -402,6 +404,12 @@ export function ClientDetail({ client, projects, onClose, inline = false }: Clie
                     LinkedIn
                   </a>
                 )}
+                <button
+                  onClick={e => { e.stopPropagation(); setGenericEdit({ entity: 'contact', data: contact as unknown as Record<string, unknown> }) }}
+                  style={{ fontSize: 10, color: 'var(--text-muted)', background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 3, padding: '1px 6px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}
+                >
+                  Edit+
+                </button>
                 <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{editContactId === contact.id ? '▲' : '▼'}</span>
               </button>
               {editContactId === contact.id && (
@@ -456,6 +464,12 @@ export function ClientDetail({ client, projects, onClose, inline = false }: Clie
                   <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{deal.status}</span>
                   <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-secondary)', flexShrink: 0 }}>{fmtCurrency(deal.quotedAmount, deal.currency)}</span>
                   {deal.expectedCloseDate && <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{fmtDate(deal.expectedCloseDate)}</span>}
+                  <button
+                    onClick={e => { e.stopPropagation(); setGenericEdit({ entity: 'project', data: deal as unknown as Record<string, unknown> }) }}
+                    style={{ fontSize: 10, color: 'var(--text-muted)', background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 3, padding: '1px 6px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}
+                  >
+                    Edit+
+                  </button>
                   <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{editProjectId === deal.id ? '▲' : '▼'}</span>
                 </button>
                 {editProjectId === deal.id && (
@@ -503,6 +517,12 @@ export function ClientDetail({ client, projects, onClose, inline = false }: Clie
                   {task.priority && <span style={{ fontSize: 'var(--fs-2xs)', color: priorityColor(task.priority), flexShrink: 0, fontWeight: 600 }}>{task.priority}</span>}
                   {task.dueDate && <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{fmtDate(task.dueDate)}</span>}
                   {task.assignedTo && <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{task.assignedTo}</span>}
+                  <button
+                    onClick={e => { e.stopPropagation(); setGenericEdit({ entity: 'task', data: task as unknown as Record<string, unknown> }) }}
+                    style={{ fontSize: 10, color: 'var(--text-muted)', background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 3, padding: '1px 6px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}
+                  >
+                    Edit+
+                  </button>
                   <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{editTaskId === task.id ? '▲' : '▼'}</span>
                 </button>
                 {editTaskId === task.id && (
@@ -537,6 +557,27 @@ export function ClientDetail({ client, projects, onClose, inline = false }: Clie
         </div>
       </div>
 
+      {/* Generic edit modal */}
+      {genericEdit && (
+        <GenericEditModal
+          entity={genericEdit.entity}
+          data={genericEdit.data}
+          onSave={updated => {
+            const id = genericEdit.data.id as string
+            if (genericEdit.entity === 'project') {
+              setLocalDeals(ds => ds.map(d => d.id === id ? { ...d, ...updated } as Project : d))
+              setLocalHistory(ds => ds.map(d => d.id === id ? { ...d, ...updated } as Project : d))
+            } else if (genericEdit.entity === 'contact') {
+              setContacts(cs => cs?.map(c => c.id === id ? { ...c, ...updated } as Contact : c) ?? null)
+            } else if (genericEdit.entity === 'task') {
+              setTasks(ts => ts?.map(t => t.id === id ? { ...t, ...updated } as Task : t) ?? null)
+            }
+            setGenericEdit(null)
+          }}
+          onClose={() => setGenericEdit(null)}
+        />
+      )}
+
       {/* Historique */}
       {localHistory.length > 0 && (
         <div>
@@ -559,6 +600,12 @@ export function ClientDetail({ client, projects, onClose, inline = false }: Clie
                   <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{deal.type}</span>
                   <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-secondary)', flexShrink: 0 }}>{fmtCurrency(deal.finalAmount || deal.quotedAmount, deal.currency)}</span>
                   <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{fmtDate(deal.dateClosed || deal.created)}</span>
+                  <button
+                    onClick={e => { e.stopPropagation(); setGenericEdit({ entity: 'project', data: deal as unknown as Record<string, unknown> }) }}
+                    style={{ fontSize: 10, color: 'var(--text-muted)', background: 'none', border: '1px solid var(--border-subtle)', borderRadius: 3, padding: '1px 6px', cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0 }}
+                  >
+                    Edit+
+                  </button>
                   <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{editHistoryId === deal.id ? '▲' : '▼'}</span>
                 </button>
                 {editHistoryId === deal.id && (
