@@ -98,6 +98,8 @@ export default function SalesPage() {
     setLocalProjects(projects)
   }, [projects])
 
+  const now = new Date()
+
   // ── KPIs ──────────────────────────────────────────────────────────────────
 
   const pipelineDeals = useMemo(() =>
@@ -192,19 +194,27 @@ export default function SalesPage() {
       <AppHeader
         appName="Sales"
         right={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-              {new Date().toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ textAlign: 'right', lineHeight: 1.1 }}>
+              <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 600 }}>
+                {now.toLocaleDateString('fr-FR', { weekday: 'long' })}
+              </div>
+              <div style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-primary)', fontWeight: 600, fontFamily: 'monospace' }}>
+                {now.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
+              </div>
+            </div>
+            <a
+              href="/"
+              style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', textDecoration: 'none', padding: '4px 10px', borderRadius: 'var(--radius-btn)', border: '1px solid var(--border-subtle)', background: 'var(--accent-soft)', whiteSpace: 'nowrap' }}
+            >
+              ← Finance
+            </a>
             <button
               onClick={() => setTab('settings')}
-              style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', textDecoration: 'none', padding: '4px 10px', borderRadius: 'var(--radius-btn)', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'inherit' }}
+              style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', textDecoration: 'none', padding: '4px 10px', borderRadius: 'var(--radius-btn)', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'inherit', whiteSpace: 'nowrap' }}
             >
               <Settings size={13} /> Réglages
             </button>
-            <a href="/" style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', textDecoration: 'none', padding: '4px 10px', borderRadius: 'var(--radius-btn)', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)' }}>
-              ← Finance
-            </a>
           </div>
         }
       />

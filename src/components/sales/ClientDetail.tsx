@@ -279,10 +279,13 @@ export function ClientDetail({ client, projects, onClose, inline = false }: Clie
   const [editContactId, setEditContactId] = useState<string | 'new' | null>(null)
   const [editTaskId, setEditTaskId] = useState<string | 'new' | null>(null)
   const [editProjectId, setEditProjectId] = useState<string | null>(null)
+  const [editHistoryId, setEditHistoryId] = useState<string | null>(null)
+  const [localHistory, setLocalHistory] = useState<Project[]>(closedDeals)
 
   useEffect(() => {
     setLocalDeals(activeDeals)
-    setEditContactId(null); setEditTaskId(null); setEditProjectId(null)
+    setLocalHistory(closedDeals)
+    setEditContactId(null); setEditTaskId(null); setEditProjectId(null); setEditHistoryId(null)
     setContacts(null); setTasks(null)
     fetch(`/api/contacts?clientId=${client.id}`)
       .then(r => r.json())
@@ -301,7 +304,7 @@ export function ClientDetail({ client, projects, onClose, inline = false }: Clie
 
   const panelStyle: React.CSSProperties = inline
     ? { width: '100%', overflowY: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 28, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 28 }
-    : { width: 820, height: '100vh', overflowY: 'auto', background: 'var(--bg-card)', borderLeft: '1px solid var(--border-accent)', padding: 32, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 28, boxShadow: 'var(--shadow-modal)' }
+    : { width: 'min(1100px, 90vw)', height: '100vh', overflowY: 'auto', background: 'var(--bg-card)', borderLeft: '1px solid var(--border-accent)', padding: 32, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 28, boxShadow: 'var(--shadow-modal)' }
 
   const content = (
     <>
@@ -535,17 +538,39 @@ export function ClientDetail({ client, projects, onClose, inline = false }: Clie
       </div>
 
       {/* Historique */}
-      {closedDeals.length > 0 && (
+      {localHistory.length > 0 && (
         <div>
-          <SectionHeader title="Historique" count={closedDeals.length} />
+          <SectionHeader title="Historique" count={localHistory.length} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {closedDeals.map(deal => (
-              <div key={deal.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', background: 'var(--bg-input)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-input)' }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', display: 'inline-block', background: statusDotColor(deal.status), flexShrink: 0 }} />
-                <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{deal.name}</span>
-                <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{deal.type}</span>
-                <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-secondary)', flexShrink: 0 }}>{fmtCurrency(deal.finalAmount || deal.quotedAmount, deal.currency)}</span>
-                <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{fmtDate(deal.dateClosed || deal.created)}</span>
+            {localHistory.map(deal => (
+              <div key={deal.id}>
+                <button
+                  onClick={() => setEditHistoryId(editHistoryId === deal.id ? null : deal.id)}
+                  style={{
+                    width: '100%', textAlign: 'left',
+                    background: editHistoryId === deal.id ? 'var(--bg-input)' : 'transparent',
+                    border: `1px solid ${editHistoryId === deal.id ? 'var(--border-accent)' : 'var(--border-subtle)'}`,
+                    borderRadius: 'var(--radius-input)', padding: '10px 12px', cursor: 'pointer', fontFamily: 'inherit',
+                    display: 'flex', alignItems: 'center', gap: 10, transition: 'all 0.15s',
+                  }}
+                >
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusDotColor(deal.status), flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 'var(--fs-xs)', color: 'var(--text-primary)', fontWeight: 500, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{deal.name}</span>
+                  <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{deal.type}</span>
+                  <span style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-secondary)', flexShrink: 0 }}>{fmtCurrency(deal.finalAmount || deal.quotedAmount, deal.currency)}</span>
+                  <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{fmtDate(deal.dateClosed || deal.created)}</span>
+                  <span style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', flexShrink: 0 }}>{editHistoryId === deal.id ? '▲' : '▼'}</span>
+                </button>
+                {editHistoryId === deal.id && (
+                  <ProjectMiniForm
+                    project={deal}
+                    onSave={updated => {
+                      setLocalHistory(ds => ds.map(d => d.id === deal.id ? { ...d, ...updated } : d))
+                      setEditHistoryId(null)
+                    }}
+                    onCancel={() => setEditHistoryId(null)}
+                  />
+                )}
               </div>
             ))}
           </div>
