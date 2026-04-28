@@ -1191,6 +1191,20 @@ export default function DashboardPage() {
   const heroProjectedSal = useMemo(() => heroData.filter(d => d.isFuture).reduce((s, d) => s + (d.salaires || 0), 0), [heroData])
   const heroProjectedEbitda = heroProjectedRev - heroProjectedDep - heroProjectedSal
 
+  const heroProjectedBothModes = useMemo(() => {
+    const compute = (mode: 'gut' | 'auto') => {
+      const save = __WIN_UI__; __WIN_UI__ = mode
+      const totals = projects.reduce((acc, p) => {
+        const r = computeProjectRevenue(p)
+        if (!r || r.kind !== 'forecast') return acc
+        return { ca: acc.ca + r.caMUR, rev: acc.rev + r.netMUR }
+      }, { ca: 0, rev: 0 })
+      __WIN_UI__ = save
+      return totals
+    }
+    return { gut: compute('gut'), auto: compute('auto') }
+  }, [projects, currentDossier])
+
   // Hide/show state pour le Finance Dashboard
   const [heroHidden, setHeroHidden] = useState<Set<string>>(new Set())
   const toggleHero = (key: string) => setHeroHidden(prev => {
@@ -1660,7 +1674,7 @@ export default function DashboardPage() {
             hidden={heroHidden} toggleHidden={toggleHero}
             fullscreen={heroFullscreen} setFullscreen={setHeroFullscreen}
             totals={{ ca: heroTotalCA, rev: heroTotalRev, dep: heroTotalDep, sal: heroTotalSal, ebitda: heroTotalEbitda }}
-            projected={{ ca: heroProjectedCA, rev: heroProjectedRev, dep: heroProjectedDep, sal: heroProjectedSal, ebitda: heroProjectedEbitda }}
+            projected={{ ca: heroProjectedCA, rev: heroProjectedRev, dep: heroProjectedDep, sal: heroProjectedSal, ebitda: heroProjectedEbitda, caGut: heroProjectedBothModes.gut.ca, cAAuto: heroProjectedBothModes.auto.ca, revGut: heroProjectedBothModes.gut.rev, revAuto: heroProjectedBothModes.auto.rev }}
             fyLabel={fy.label}
             forecastWinMode={forecastWinMode} setForecastWinMode={setForecastWinMode}
           />
@@ -4497,10 +4511,11 @@ function FinanceDashboard({ heroData, heroMode, setHeroMode, heroPast, setHeroPa
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px", borderBottom: "1px solid rgba(166,201,206,0.08)", flexWrap: "wrap", gap: 12 }}>
         <div>
           <div style={{ fontSize: "var(--fs-md)", fontWeight: 600, color: "var(--text-primary)" }}>Finance Dashboard</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4, fontFamily: "monospace" }}>
-            <span><span style={{ color: "var(--text-muted)" }}>Total </span><span style={{ color: "#3D8899", fontWeight: 700 }}>CA</span> = <span style={{ color: "var(--text-primary)" }}>{Math.round(totals.ca + projected.ca).toLocaleString("fr-FR")}</span> <span style={{ color: "var(--text-muted)" }}>({Math.round(totals.ca).toLocaleString("fr-FR")} A + {Math.round(projected.ca).toLocaleString("fr-FR")} P)</span></span>
-            <span><span style={{ color: "#A6C9CE", fontWeight: 700 }}>Revenu</span> = <span style={{ color: "var(--text-primary)" }}>{Math.round(totals.rev + projected.rev).toLocaleString("fr-FR")}</span> <span style={{ color: "var(--text-muted)" }}>({Math.round(totals.rev).toLocaleString("fr-FR")} A + {Math.round(projected.rev).toLocaleString("fr-FR")} P)</span></span>
-            <span><span style={{ color: "#22c55e", fontWeight: 700 }}>EBITDA</span> = <span style={{ color: "var(--text-primary)" }}>{Math.round(totals.ebitda + projected.ebitda).toLocaleString("fr-FR")}</span> <span style={{ color: "var(--text-muted)" }}>({Math.round(totals.ebitda).toLocaleString("fr-FR")} A + {Math.round(projected.ebitda).toLocaleString("fr-FR")} P)</span></span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, fontSize: "var(--fs-2xs)", color: "var(--text-muted)", marginTop: 4, fontFamily: "monospace" }}>
+            <span><span style={{ color: "#A6C9CE", fontWeight: 700 }}>CA gut </span><span style={{ color: "var(--text-primary)", fontWeight: 700 }}>{Math.round(totals.ca + (projected.caGut ?? projected.ca)).toLocaleString("fr-FR")}</span></span>
+            <span><span style={{ color: "#7BB3BE", fontWeight: 700 }}>CA auto </span><span style={{ color: "var(--text-primary)", fontWeight: 700 }}>{Math.round(totals.ca + (projected.cAAuto ?? projected.ca)).toLocaleString("fr-FR")}</span></span>
+            <span><span style={{ color: "#A6C9CE", fontWeight: 600 }}>Rev gut </span><span style={{ color: "var(--text-primary)", fontWeight: 700 }}>{Math.round(totals.rev + (projected.revGut ?? projected.rev)).toLocaleString("fr-FR")}</span></span>
+            <span><span style={{ color: "#7BB3BE", fontWeight: 600 }}>Rev auto </span><span style={{ color: "var(--text-primary)", fontWeight: 700 }}>{Math.round(totals.rev + (projected.revAuto ?? projected.rev)).toLocaleString("fr-FR")}</span></span>
           </div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>

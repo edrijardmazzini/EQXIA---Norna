@@ -23,8 +23,8 @@ export function EqxiaLoadingScreen({ appName, bgImage }: EqxiaLoadingScreenProps
       setTimeout(() => {
         setIdx(i => (i + 1) % LOADING_TEXTS.length)
         setVisible(true)
-      }, 70)
-    }, 300)
+      }, 150)
+    }, 900)
     return () => clearInterval(id)
   }, [])
 

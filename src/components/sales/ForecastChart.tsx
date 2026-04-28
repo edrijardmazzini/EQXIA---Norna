@@ -63,9 +63,10 @@ interface MonthDatum {
 interface BuildResult {
   months: MonthDatum[]
   types: string[]
-  totalCA: number
-  totalGut: number
-  totalAuto: number
+  totalCAGut: number
+  totalCAAuto: number
+  totalRevGut: number
+  totalRevAuto: number
 }
 
 function buildData(projects: Project[], mode: WeightMode, period: Period): BuildResult {
@@ -90,17 +91,19 @@ function buildData(projects: Project[], mode: WeightMode, period: Period): Build
 
   const types = Array.from(typesSet).sort()
 
-  // Compute summary totals in one pass
-  let totalCA = 0, totalGut = 0, totalAuto = 0
+  // Compute summary totals in one pass — always both modes
+  let totalCAGut = 0, totalCAAuto = 0, totalRevGut = 0, totalRevAuto = 0
   for (const p of projects) {
     if (!p.type || !typesSet.has(p.type)) continue
     if (!ymSet.has(resolveYM(p))) continue
-    const ca = p.quotedAmount || p.finalAmount || 0
-    totalCA += ca
+    const caBase = p.quotedAmount || 0
+    const revBase = p.finalAmount || p.quotedAmount || 0
     const wGut = CLOSED_WON.has(p.status) ? 1 : getWeight(p, 'gut')
     const wAuto = CLOSED_WON.has(p.status) ? 1 : getWeight(p, 'auto')
-    totalGut += ca * wGut
-    totalAuto += ca * wAuto
+    totalCAGut += caBase * wGut
+    totalCAAuto += caBase * wAuto
+    totalRevGut += revBase * wGut
+    totalRevAuto += revBase * wAuto
   }
 
   const months: MonthDatum[] = ymLabels.map(({ ym, label }) => {
@@ -120,7 +123,7 @@ function buildData(projects: Project[], mode: WeightMode, period: Period): Build
     return datum
   })
 
-  return { months, types, totalCA, totalGut, totalAuto }
+  return { months, types, totalCAGut, totalCAAuto, totalRevGut, totalRevAuto }
 }
 
 // ── Btn ──────────────────────────────────────────────────────────────────────
@@ -193,8 +196,9 @@ export function ForecastChart({ projects }: ForecastChartProps) {
   const [weightMode, setWeightMode] = useState<WeightMode>('gut')
   const [chartType, setChartType] = useState<ChartType>('line')
   const [period, setPeriod] = useState<Period>('6m')
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null)
 
-  const { months, types, totalCA, totalGut, totalAuto } = useMemo(
+  const { months, types, totalCAGut, totalCAAuto, totalRevGut, totalRevAuto } = useMemo(
     () => buildData(projects, weightMode, period),
     [projects, weightMode, period],
   )
@@ -231,16 +235,20 @@ export function ForecastChart({ projects }: ForecastChartProps) {
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, fontSize: 'var(--fs-2xs)', fontFamily: 'monospace' }}>
             <span>
-              <span style={{ color: 'var(--text-muted)' }}>CA </span>
-              <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{fmtCurrency(totalCA)}</span>
+              <span style={{ color: '#A6C9CE', fontWeight: 700 }}>CA gut </span>
+              <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{fmtCurrency(totalCAGut)}</span>
             </span>
             <span>
-              <span style={{ color: '#A6C9CE', fontWeight: 700 }}>% gut </span>
-              <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{fmtCurrency(totalGut)}</span>
+              <span style={{ color: '#7BB3BE', fontWeight: 700 }}>CA auto </span>
+              <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{fmtCurrency(totalCAAuto)}</span>
             </span>
             <span>
-              <span style={{ color: '#7BB3BE', fontWeight: 700 }}>% auto </span>
-              <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{fmtCurrency(totalAuto)}</span>
+              <span style={{ color: '#A6C9CE', fontWeight: 600 }}>Rev gut </span>
+              <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{fmtCurrency(totalRevGut)}</span>
+            </span>
+            <span>
+              <span style={{ color: '#7BB3BE', fontWeight: 600 }}>Rev auto </span>
+              <span style={{ color: 'var(--text-primary)', fontWeight: 700 }}>{fmtCurrency(totalRevAuto)}</span>
             </span>
           </div>
         </div>
@@ -282,17 +290,24 @@ export function ForecastChart({ projects }: ForecastChartProps) {
           <XAxis dataKey="label" tick={AXIS_TICK_STYLE} axisLine={false} tickLine={false} />
           <YAxis tick={AXIS_TICK_STYLE} axisLine={false} tickLine={false} tickFormatter={v => fmtCurrency(v as number)} width={72} />
           <Tooltip content={tooltipContent} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
-          <Legend wrapperStyle={{ fontSize: 11, paddingTop: 10 }} formatter={legendFormatter} />
+          <Legend
+            wrapperStyle={{ fontSize: 11, paddingTop: 10 }}
+            formatter={legendFormatter}
+            onMouseEnter={e => setHoveredKey((e as { dataKey?: string }).dataKey ?? null)}
+            onMouseLeave={() => setHoveredKey(null)}
+          />
 
           {chartType === 'bar'
             ? types.map((t, i) => (
               <Bar key={t} dataKey={t} stackId="a" fill={TYPE_COLORS[t] || '#6b7280'} name={t}
+                opacity={hoveredKey && hoveredKey !== t ? 0.2 : 1}
                 radius={i === types.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]} />
             ))
             : types.map(t => (
               <Line key={t} type="monotone" dataKey={t} stroke={TYPE_COLORS[t] || '#6b7280'}
                 strokeWidth={2} dot={{ r: 3, fill: TYPE_COLORS[t] || '#6b7280', strokeWidth: 0 }}
-                activeDot={{ r: 5 }} name={t} />
+                activeDot={{ r: 5 }} name={t}
+                strokeOpacity={hoveredKey && hoveredKey !== t ? 0.2 : 1} />
             ))
           }
 
@@ -306,6 +321,7 @@ export function ForecastChart({ projects }: ForecastChartProps) {
             dot={false}
             activeDot={{ r: 4, fill: TOTAL_COLOR, strokeWidth: 0 }}
             name="_total"
+            strokeOpacity={hoveredKey && hoveredKey !== '_total' ? 0.2 : 1}
           />
         </ComposedChart>
       </ResponsiveContainer>

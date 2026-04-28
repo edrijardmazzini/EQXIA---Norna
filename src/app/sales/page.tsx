@@ -299,7 +299,7 @@ export default function SalesPage() {
 
             {/* Forecast + Funnel */}
             <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 20 }}>
-              <ChartCard title="Prévisionnel 6 mois" sub="Basé sur Expected Close Date">
+              <ChartCard title="Prévisionnel" sub="Basé sur Expected Close Date">
                 <ForecastChart projects={localProjects} />
               </ChartCard>
               <ChartCard title="Funnel de conversion">
