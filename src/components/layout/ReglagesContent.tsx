@@ -393,6 +393,17 @@ export function ReglagesContent() {
           )}
         </div>
       </Section>
+
+      <details style={{ opacity: 0.45, marginTop: 8 }}>
+        <summary style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', cursor: 'pointer', userSelect: 'none', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>▸</span> mots de chargement
+        </summary>
+        <div style={{ marginTop: 6, padding: '8px 12px', background: 'var(--bg-input)', borderRadius: 6, border: '1px solid var(--border-subtle)', display: 'flex', flexWrap: 'wrap', gap: '4px 10px' }}>
+          {['Julienning','Alexing','Govining','Pierreling','Patening','Guillosesting','Drijaring','Mazzining','Roding','Eqxing','Kiting','Bumble-Beeing','Megatroning','Moonloying','Pragmacticing','Beavering','Slash-compacting','Emiling','Sasching','Fiaking','BodIAbuilding'].map(w => (
+            <span key={w} style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{w}…</span>
+          ))}
+        </div>
+      </details>
     </div>
   )
 }

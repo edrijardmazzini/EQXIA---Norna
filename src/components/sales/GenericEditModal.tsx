@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 
-type EntityType = 'project' | 'contact' | 'task'
+type EntityType = 'project' | 'contact' | 'task' | 'depense'
 
 interface FieldDef {
   key: string
@@ -79,6 +79,24 @@ const CONTACT_FIELDS: FieldDef[] = [
   { key: 'notes',    label: 'Notes',       type: 'textarea', span2: true },
 ]
 
+const DEPENSE_CATEGORIES = ['Logiciels & Abonnements', 'Infrastructure', 'Ressources Humaines', 'Marketing', 'Déplacements', 'Bureaux', 'Matériel', 'Formation', 'Juridique & Compta', 'Divers']
+const DEVISE_OPTIONS = ['MUR', 'EUR', 'USD', 'GBP', 'KES', 'ZAR']
+
+const DEPENSE_FIELDS: FieldDef[] = [
+  { key: 'id',               label: 'ID Notion',         type: 'text',   readOnly: true, span2: true },
+  { key: 'description',      label: 'Description',       type: 'text',                   span2: true },
+  { key: 'fournisseur',      label: 'Fournisseur',       type: 'text' },
+  { key: 'categorie',        label: 'Catégorie',         type: 'select', options: ['', ...DEPENSE_CATEGORIES] },
+  { key: 'sousCategorie',    label: 'Sous-catégorie',    type: 'text' },
+  { key: 'date',             label: 'Date',              type: 'date' },
+  { key: 'montant',          label: 'Montant',           type: 'number' },
+  { key: 'devise',           label: 'Devise',            type: 'select', options: DEVISE_OPTIONS },
+  { key: 'payePar',          label: 'Payé par',          type: 'text' },
+  { key: 'abonnement',       label: 'Abonnement',        type: 'text' },
+  { key: 'recurrence',       label: 'Récurrence',        type: 'select', options: ['', 'Mensuel', 'Annuel'] },
+  { key: 'recurringCritical',label: 'Récurrent critique',type: 'checkbox' },
+]
+
 const TASK_FIELDS: FieldDef[] = [
   { key: 'id',         label: 'ID Notion',          type: 'text',   readOnly: true, span2: true },
   { key: 'name',       label: 'Tâche',              type: 'text',                   span2: true },
@@ -94,18 +112,21 @@ const FIELDS_MAP: Record<EntityType, FieldDef[]> = {
   project: PROJECT_FIELDS,
   contact: CONTACT_FIELDS,
   task: TASK_FIELDS,
+  depense: DEPENSE_FIELDS,
 }
 
 const API_URL: Record<EntityType, (id: string) => string> = {
   project: id => `/api/sales/${id}`,
   contact: id => `/api/contacts/${id}`,
   task:    id => `/api/tasks/${id}`,
+  depense: id => `/api/depenses/${id}`,
 }
 
 const ENTITY_LABELS: Record<EntityType, string> = {
   project: 'Projet / Deal',
   contact: 'Contact',
   task:    'Tâche',
+  depense: 'Dépense',
 }
 
 const BASE_INPUT: React.CSSProperties = {

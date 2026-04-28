@@ -476,7 +476,7 @@ export default function DashboardPage() {
   const [depByEmployee, setDepByEmployee] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
   const [showReglagesPanel, setShowReglagesPanel] = useState(false)
-  const [genericEditPl, setGenericEditPl] = useState<{ entity: 'project'; data: Record<string, unknown> } | null>(null)
+  const [genericEditPl, setGenericEditPl] = useState<{ entity: 'project' | 'depense'; data: Record<string, unknown> } | null>(null)
 
   const currentRevMois = hoverRevMois
   const currentDepMois = hoverDepMois
@@ -596,9 +596,6 @@ export default function DashboardPage() {
 
   const depTotal = useMemo(() => depFiltered.reduce((s, d) => s + d.montantMUR, 0), [depFiltered])
   const depTotalAll = useMemo(() => depenses.reduce((s, d) => s + d.montantMUR, 0), [depenses])
-  const revTotalAll = useMemo(() => {
-    return projects.filter(p => computeProjectRevenue(p)?.kind === "actual").reduce((s, p) => s + getRevenueMUR(p), 0)
-  }, [projects])
   const revTotal = useMemo(() => revFilteredProjects.reduce((s, p) => s + getRevenueMUR(p), 0), [revFilteredProjects])
   const caTotal = useMemo(() => revFilteredProjects.reduce((s, p) => s + getCAMUR(p), 0), [revFilteredProjects])
   const totalProfit = revTotal - depTotal
@@ -883,6 +880,10 @@ export default function DashboardPage() {
       }
     })
   }, [revChartRange, currentDossier])
+
+  const revRangeTotal = useMemo(() =>
+    revParMois.filter(d => !d.isFuture).reduce((s, d) => s + (d.revenus || 0), 0)
+  , [revParMois])
 
   // Revenus par mois ventilés par type de projet (hors Internal pour cohérence)
   // Couvre tous les mois de la série (revenus + dépenses) pour que l'axe soit continu
@@ -1877,12 +1878,12 @@ export default function DashboardPage() {
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
                           <thead style={{ position: "sticky", top: 0, background: "var(--bg-card)", zIndex: 2 }}>
                             <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.15)" }}>
-                              {["Date", "Description", "Fournisseur", "Catégorie", "Montant", "MUR"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                              {["Date", "Description", "Fournisseur", "Catégorie", "Montant", "MUR", ""].map(h => <th key={h} style={thStyle}>{h}</th>)}
                             </tr>
                           </thead>
                           <tbody>
                             {listItems.length === 0 ? (
-                              <tr><td colSpan={6} style={{ textAlign: "center", padding: 32, color: "var(--text-muted)", fontStyle: "italic" }}>Aucune dépense pour ce filtre</td></tr>
+                              <tr><td colSpan={7} style={{ textAlign: "center", padding: 32, color: "var(--text-muted)", fontStyle: "italic" }}>Aucune dépense pour ce filtre</td></tr>
                             ) : listItems.map((d, i) => {
                               const c = (d.categorie && depCategoryColors[d.categorie]) || "#6b7280"
                               return (
@@ -1897,6 +1898,7 @@ export default function DashboardPage() {
                                   </td>
                                   <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 600 }}>{d.montant.toLocaleString("fr-FR")} {d.devise}</td>
                                   <td style={{ ...tdStyle, fontFamily: "monospace", fontWeight: 700, color: "#ef4444" }}>{Math.round(d.montantMUR).toLocaleString("fr-FR")}</td>
+                                  <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'depense', data: d as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                                 </tr>
                               )
                             })}
@@ -2021,7 +2023,7 @@ export default function DashboardPage() {
             <ChartCard
               title="Revenus mensuels"
               sub="Revenu net = Final Amount − Commission"
-              value={`${Math.round(revTotalAll).toLocaleString("fr-FR")} MUR`}
+              value={`${Math.round(revRangeTotal).toLocaleString("fr-FR")} MUR`}
               expandable
               right={
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -2424,7 +2426,7 @@ export default function DashboardPage() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "var(--fs-xs)" }}>
                   <thead style={{ position: "sticky", top: 0, zIndex: 2, background: "var(--bg-panel)" }}>
                     <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.08)" }}>
-                      {["Date", "Description", "Fournisseur", "Montant", "Catégorie"].map(h => <th key={h} style={thStyle}>{h}</th>)}
+                      {["Date", "Description", "Fournisseur", "Montant", "Catégorie", ""].map(h => <th key={h} style={thStyle}>{h}</th>)}
                     </tr>
                     <tr style={{ borderBottom: "1px solid rgba(166,201,206,0.12)" }}>
                       <th style={filterCellStyle}>
@@ -2442,6 +2444,7 @@ export default function DashboardPage() {
                           {CATEGORIE_OPTIONS.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
                       </th>
+                      <th style={filterCellStyle} />
                     </tr>
                   </thead>
                   <tbody>{filteredDep.map((d, i) => (
@@ -2451,6 +2454,7 @@ export default function DashboardPage() {
                       <td style={{ ...tdStyle, color: "var(--text-secondary)" }}>{d.fournisseur}</td>
                       <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace" }}>{d.montant.toLocaleString("fr-FR")} {d.devise}</td>
                       <td style={tdStyle}>{d.categorie ? (() => { const c = depCategoryColors[d.categorie] || "#6b7280"; return <span style={{ background: `${c}22`, color: c, padding: "2px 8px", borderRadius: 4, fontSize: "var(--fs-2xs)", fontWeight: 600 }}>{d.categorie}</span> })() : "—"}</td>
+                      <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'depense', data: d as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                     </tr>
                   ))}</tbody>
                 </table>
@@ -2864,6 +2868,7 @@ export default function DashboardPage() {
                       <th style={{ ...thStyle, textAlign: "right" }}>Taux</th>
                       <th style={{ ...thStyle, textAlign: "right" }}>Commission (MUR)</th>
                       <th style={thStyle}>Date fin</th>
+                      <th style={thStyle} />
                     </tr>
                   </thead>
                   <tbody>
@@ -2874,6 +2879,7 @@ export default function DashboardPage() {
                         <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace", color: "var(--text-muted)" }}>{(getCommissionRate(p) * 100).toFixed(1)} %</td>
                         <td style={{ ...tdStyle, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#f97316" }}>{Math.round(getCommissionMUR(p)).toLocaleString("fr-FR")}</td>
                         <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{p.endDate || p.startDate || "—"}</td>
+                        <td style={{ ...tdStyle, padding: "6px 8px" }}><button onClick={e => { e.stopPropagation(); setGenericEditPl({ entity: 'project', data: p as unknown as Record<string, unknown> }) }} style={{ background: "rgba(166,201,206,0.08)", border: "1px solid var(--border-subtle)", borderRadius: 4, color: "var(--text-muted)", cursor: "pointer", fontSize: 10, padding: "2px 7px", fontFamily: "inherit", whiteSpace: "nowrap" }}>Edit+</button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -2889,7 +2895,11 @@ export default function DashboardPage() {
           entity={genericEditPl.entity}
           data={genericEditPl.data}
           onSave={updated => {
-            setProjects(prev => prev.map(p => p.id === genericEditPl.data.id ? { ...p, ...updated } : p))
+            if (genericEditPl.entity === 'project') {
+              setProjects(prev => prev.map(p => p.id === genericEditPl.data.id ? { ...p, ...updated } : p))
+            } else if (genericEditPl.entity === 'depense') {
+              setDepenses(prev => prev.map(d => d.id === genericEditPl.data.id ? { ...d, ...updated } : d))
+            }
             setGenericEditPl(null)
           }}
           onClose={() => setGenericEditPl(null)}

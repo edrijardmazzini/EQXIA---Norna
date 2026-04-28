@@ -9,7 +9,7 @@ import type { Project } from '@/types/sales'
 import { PIPELINE_COLS, CLOSED_WON, fmtCurrency } from '@/types/sales'
 
 interface FunnelChartProps { projects: Project[] }
-type ViewMode = 'funnel' | 'bars' | 'recharts' | 'bar-v'
+type ViewMode = 'funnel' | 'bars' | 'recharts' | 'bar-v' | 'curved'
 
 // ── Data helpers ───────────────────────────────────────────────────────────
 
@@ -243,6 +243,142 @@ function BarVView({ funnelData }: { funnelData: ReturnType<typeof buildFunnelDat
   )
 }
 
+// ── Vue entonnoir SVG courbe (bezier) ──────────────────────────────────────
+
+function CurvedFunnelView({ funnelData }: { funnelData: ReturnType<typeof buildFunnelData> }) {
+  const [tooltip, setTooltip] = useState<{ entry: ReturnType<typeof buildFunnelData>[0]; x: number; y: number } | null>(null)
+  const data = funnelData.filter(d => d.value > 0 || d.count > 0)
+  if (data.length === 0) return null
+
+  const W = 460
+  const H = 300
+  const PAD_LEFT = 10
+  const PAD_RIGHT = 160  // labels on right
+  const usableW = W - PAD_LEFT - PAD_RIGHT
+  const rowH = H / data.length
+  const maxVal = Math.max(...data.map(d => d.value), 1)
+
+  // Width of each stage proportional to value, minimum 8%
+  const widths = data.map(d => Math.max(0.08, d.value / maxVal) * usableW)
+
+  // Build a single continuous bezier polygon for the funnel silhouette
+  // Left edge goes top-wide → bottom-narrow; right edge mirrors
+  const segments: { path: string; fill: string; midY: number; w: number; entry: ReturnType<typeof buildFunnelData>[0] }[] = []
+
+  for (let i = 0; i < data.length; i++) {
+    const y0 = i * rowH
+    const y1 = (i + 1) * rowH
+    const midY = (y0 + y1) / 2
+    const w0 = widths[i]
+    const w1 = i + 1 < data.length ? widths[i + 1] : widths[i] * 0.6
+    const cx = PAD_LEFT + usableW / 2
+
+    // Top edge of this segment
+    const lx0 = cx - w0 / 2
+    const rx0 = cx + w0 / 2
+    // Bottom edge
+    const lx1 = cx - w1 / 2
+    const rx1 = cx + w1 / 2
+
+    // Bezier control points: pull them inward at midpoint for a concave pinch
+    const cpY = (y0 + y1) / 2
+    const tension = 0.35
+    const lCpX = lx0 + (lx1 - lx0) * tension
+    const rCpX = rx0 + (rx1 - rx0) * tension
+
+    const path = [
+      `M ${lx0} ${y0}`,
+      `Q ${lCpX} ${cpY} ${lx1} ${y1}`,
+      `L ${rx1} ${y1}`,
+      `Q ${rCpX} ${cpY} ${rx0} ${y0}`,
+      'Z',
+    ].join(' ')
+
+    segments.push({ path, fill: data[i].fill, midY, w: w0, entry: data[i] })
+  }
+
+  return (
+    <div style={{ position: 'relative', width: '100%' }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', overflow: 'visible' }}>
+        <defs>
+          {segments.map((s, i) => (
+            <linearGradient key={i} id={`cg${i}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={s.fill} stopOpacity="0.95" />
+              <stop offset="100%" stopColor={s.fill} stopOpacity="0.6" />
+            </linearGradient>
+          ))}
+        </defs>
+        {segments.map((s, i) => (
+          <g key={i}
+            onMouseEnter={e => setTooltip({ entry: s.entry, x: e.clientX, y: e.clientY })}
+            onMouseLeave={() => setTooltip(null)}
+            style={{ cursor: 'default' }}
+          >
+            <path d={s.path} fill={`url(#cg${i})`} />
+            {/* Thin separator line */}
+            {i > 0 && (
+              <line
+                x1={PAD_LEFT + usableW / 2 - s.w / 2}
+                y1={i * rowH}
+                x2={PAD_LEFT + usableW / 2 + s.w / 2}
+                y2={i * rowH}
+                stroke="rgba(0,0,0,0.15)" strokeWidth="1"
+              />
+            )}
+            {/* Count badge in center */}
+            {s.entry.count > 0 && (
+              <text
+                x={PAD_LEFT + usableW / 2}
+                y={s.midY + 4}
+                textAnchor="middle"
+                fill="white"
+                fontSize="12"
+                fontWeight="700"
+              >
+                {s.entry.count}
+              </text>
+            )}
+            {/* Label on right */}
+            <text
+              x={PAD_LEFT + usableW / 2 + s.w / 2 + 10}
+              y={s.midY - 5}
+              fill="var(--text-secondary)"
+              fontSize="11"
+              fontWeight="600"
+            >
+              {s.entry.name}
+            </text>
+            {s.entry.value > 0 && (
+              <text
+                x={PAD_LEFT + usableW / 2 + s.w / 2 + 10}
+                y={s.midY + 9}
+                fill="var(--accent)"
+                fontSize="10"
+              >
+                {fmtCurrency(s.entry.value)}
+              </text>
+            )}
+          </g>
+        ))}
+      </svg>
+      {tooltip && (
+        <div style={{
+          position: 'fixed', left: tooltip.x + 12, top: tooltip.y - 8, zIndex: 100,
+          background: 'var(--bg-card)', border: '1px solid var(--border-subtle)',
+          borderRadius: 8, padding: '7px 11px', fontSize: 12, pointerEvents: 'none',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.4)', whiteSpace: 'nowrap',
+        }}>
+          <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 }}>{tooltip.entry.name}</div>
+          <div style={{ color: 'var(--text-secondary)' }}>{tooltip.entry.count} deal{tooltip.entry.count !== 1 ? 's' : ''}</div>
+          {tooltip.entry.value > 0 && (
+            <div style={{ color: 'var(--accent)', fontWeight: 600, marginTop: 2 }}>CA×gut {fmtCurrency(tooltip.entry.value)}</div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main ───────────────────────────────────────────────────────────────────
 
 export function FunnelChart({ projects }: FunnelChartProps) {
@@ -288,6 +424,13 @@ export function FunnelChart({ projects }: FunnelChartProps) {
           </svg>
           Groupé
         </Btn>
+        <Btn active={mode === 'curved'} onClick={() => setMode('curved')}>
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <path d="M2 1.5 Q6.5 4 11 1.5 L9 7 Q6.5 8.5 4 7 Z" fill="currentColor" opacity="0.7"/>
+            <path d="M4 7 Q6.5 8.5 9 7 L8 11 Q6.5 12 5 11 Z" fill="currentColor"/>
+          </svg>
+          Courbe
+        </Btn>
       </div>
 
       {mode === 'funnel' && (
@@ -315,6 +458,7 @@ export function FunnelChart({ projects }: FunnelChartProps) {
 
       {mode === 'recharts' && <RechartsView funnelData={funnelData} />}
       {mode === 'bar-v' && <BarVView funnelData={funnelData} />}
+      {mode === 'curved' && <CurvedFunnelView funnelData={funnelData} />}
     </div>
   )
 }
