@@ -26,6 +26,43 @@ const labelStyle: React.CSSProperties = {
   fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', display: 'block',
   marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.06em',
 }
+const modalCenterStyle: React.CSSProperties = {
+  position: 'fixed', top: '50%', left: '50%',
+  transform: 'translate(-50%,-50%)', zIndex: 50,
+  background: 'var(--bg-card)', border: '1px solid var(--border-accent)',
+  borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-modal)',
+}
+const modalActionsStyle: React.CSSProperties = { display: 'flex', gap: 10, justifyContent: 'flex-end' }
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+async function apiFetch(url: string, body: Record<string, unknown>): Promise<void> {
+  await fetch(url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+}
+
+// ── FilterChip ─────────────────────────────────────────────────────────────
+
+function FilterChip({ selected, onClick, color, children }: {
+  selected: boolean; onClick: () => void; color?: string; children: React.ReactNode
+}) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '4px 10px', fontSize: 'var(--fs-xs)', borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit',
+      border: selected ? `1px solid ${color || 'var(--accent)'}` : '1px solid var(--border-subtle)',
+      background: selected ? (color ? `${color}22` : 'var(--accent-soft)') : 'transparent',
+      color: selected ? (color || 'var(--accent)') : 'var(--text-muted)',
+      transition: 'all 0.12s',
+    }}>
+      {children}
+    </button>
+  )
+}
+
+// ── KanbanBoard ────────────────────────────────────────────────────────────
 
 interface KanbanBoardProps {
   projects: Project[]
@@ -71,11 +108,7 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
       return
     }
     onProjectsChange(projects.map(p => p.id === dealId ? { ...p, status: newStatus } : p))
-    await fetch(`/api/sales/${dealId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: newStatus }),
-    })
+    await apiFetch(`/api/sales/${dealId}`, { status: newStatus })
   }
 
   async function confirmLost(reason: string) {
@@ -83,22 +116,14 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
     const { dealId, targetStatus } = lostPrompt
     setLostPrompt(null)
     onProjectsChange(projects.map(p => p.id === dealId ? { ...p, status: targetStatus, lostReason: reason } : p))
-    await fetch(`/api/sales/${dealId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: targetStatus, lostReason: reason }),
-    })
+    await apiFetch(`/api/sales/${dealId}`, { status: targetStatus, lostReason: reason })
   }
 
   async function saveDealEdit() {
     if (!selectedDeal) return
     setEditSaving(true)
     try {
-      await fetch(`/api/sales/${selectedDeal.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editState),
-      })
+      await apiFetch(`/api/sales/${selectedDeal.id}`, editState as Record<string, unknown>)
       onProjectsChange(projects.map(p => p.id === selectedDeal.id ? { ...p, ...editState } : p))
       setSelectedDeal(null)
       setEditState({})
@@ -147,34 +172,17 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-        {/* Type filter chips */}
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', flex: 1 }}>
-          <button
-            onClick={() => setTypeFilter('')}
-            style={{
-              padding: '4px 10px', fontSize: 'var(--fs-xs)', borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit',
-              border: typeFilter === '' ? '1px solid var(--accent)' : '1px solid var(--border-subtle)',
-              background: typeFilter === '' ? 'var(--accent-soft)' : 'transparent',
-              color: typeFilter === '' ? 'var(--accent)' : 'var(--text-muted)',
-              transition: 'all 0.12s',
-            }}
-          >
-            Tous
-          </button>
+          <FilterChip selected={typeFilter === ''} onClick={() => setTypeFilter('')}>Tous</FilterChip>
           {pipelineTypes.map(t => (
-            <button
+            <FilterChip
               key={t}
+              selected={typeFilter === t}
               onClick={() => setTypeFilter(prev => prev === t ? '' : t)}
-              style={{
-                padding: '4px 10px', fontSize: 'var(--fs-xs)', borderRadius: 20, cursor: 'pointer', fontFamily: 'inherit',
-                border: typeFilter === t ? `1px solid ${TYPE_COLORS[t] || 'var(--accent)'}` : '1px solid var(--border-subtle)',
-                background: typeFilter === t ? `${TYPE_COLORS[t] || 'var(--accent)'}22` : 'transparent',
-                color: typeFilter === t ? (TYPE_COLORS[t] || 'var(--accent)') : 'var(--text-muted)',
-                transition: 'all 0.12s',
-              }}
+              color={TYPE_COLORS[t]}
             >
               {t}
-            </button>
+            </FilterChip>
           ))}
         </div>
         <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
@@ -187,6 +195,8 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
         {PIPELINE_COLS.map(col => {
           const colDeals = filtered.filter(d => d.status === col.status)
           const total = colDeals.reduce((s, d) => s + d.quotedAmount, 0)
+          const caGut = colDeals.reduce((s, d) => s + (d.quotedAmount || 0) * gutFn(d), 0)
+          const revGut = colDeals.reduce((s, d) => s + (d.netAmount || 0) * gutFn(d), 0)
           return (
             <div
               key={col.status}
@@ -214,26 +224,18 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
                     {colDeals.length}
                   </span>
                 </div>
-                {total > 0 && (() => {
-                  const caGut = colDeals.reduce((s, d) => s + (d.quotedAmount || 0) * gutFn(d), 0)
-                  const revGut = colDeals.reduce((s, d) => s + (d.netAmount || 0) * gutFn(d), 0)
-                  return (
-                    <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      <span><span style={{ opacity: 0.55 }}>CA×gut </span>{fmtCurrency(caGut)}</span>
-                      <span style={{ opacity: 0.3 }}>|</span>
-                      <span><span style={{ opacity: 0.55 }}>Rev×gut </span>{fmtCurrency(revGut)}</span>
-                    </div>
-                  )
-                })()}
+                {total > 0 && (
+                  <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    <span><span style={{ opacity: 0.55 }}>CA×gut </span>{fmtCurrency(caGut)}</span>
+                    <span style={{ opacity: 0.3 }}>|</span>
+                    <span><span style={{ opacity: 0.55 }}>Rev×gut </span>{fmtCurrency(revGut)}</span>
+                  </div>
+                )}
               </div>
 
               <div style={{ padding: '8px', display: 'flex', flexDirection: 'column', gap: 8, minHeight: 60 }}>
                 {colDeals.map(deal => (
-                  <div
-                    key={deal.id}
-                    draggable
-                    onDragStart={e => e.dataTransfer.setData('dealId', deal.id)}
-                  >
+                  <div key={deal.id} draggable onDragStart={e => e.dataTransfer.setData('dealId', deal.id)}>
                     <DealCard deal={deal} onClick={() => { setSelectedDeal(deal); setEditState({}) }} />
                   </div>
                 ))}
@@ -259,7 +261,7 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
 
       {/* Quick entry modal */}
       {showQuickEntry && (
-        <div onClick={e => e.stopPropagation()} style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 50, width: 480, background: 'var(--bg-card)', border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-modal)', padding: 28 }}>
+        <div onClick={e => e.stopPropagation()} style={{ ...modalCenterStyle, width: 480, padding: 28 }}>
           <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, marginBottom: 20 }}>Nouveau deal</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
             <div style={{ gridColumn: '1 / -1' }}>
@@ -313,7 +315,7 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
               <input type="range" min={0} max={100} step={5} value={form.winPercent} onChange={e => setForm(f => ({ ...f, winPercent: Number(e.target.value) }))} style={{ width: '100%', accentColor: 'var(--accent)' }} />
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+          <div style={{ ...modalActionsStyle, marginTop: 24 }}>
             <Button variant="ghost" onClick={() => setShowQuickEntry(false)}>Annuler</Button>
             <Button variant="primary" loading={saving} onClick={createDeal} disabled={!form.name.trim()}>Créer</Button>
           </div>
@@ -322,7 +324,7 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
 
       {/* Deal detail modal */}
       {selectedDeal && (
-        <div onClick={e => e.stopPropagation()} style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 50, width: 540, maxHeight: '90vh', overflowY: 'auto', background: 'var(--bg-card)', border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-modal)', padding: 28 }}>
+        <div onClick={e => e.stopPropagation()} style={{ ...modalCenterStyle, width: 540, maxHeight: '90vh', overflowY: 'auto', padding: 28 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 20 }}>
             <div>
               <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, marginBottom: 4 }}>{selectedDeal.name}</div>
@@ -338,8 +340,7 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
                     fontSize: 'var(--fs-sm)', color: onClientClick ? 'var(--accent)' : 'var(--text-muted)',
                     background: 'none', border: 'none', padding: 0, cursor: onClientClick ? 'pointer' : 'default',
                     fontFamily: 'inherit', textDecoration: onClientClick ? 'underline' : 'none',
-                    textDecorationColor: 'rgba(166,201,206,0.4)',
-                    textUnderlineOffset: 3,
+                    textDecorationColor: 'rgba(166,201,206,0.4)', textUnderlineOffset: 3,
                   }}
                 >
                   {selectedDeal.clientName} →
@@ -410,7 +411,7 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <div style={modalActionsStyle}>
             <Button variant="ghost" onClick={() => { setSelectedDeal(null); setEditState({}) }}>Fermer</Button>
             <Button variant="primary" loading={editSaving} onClick={saveDealEdit} disabled={Object.keys(editState).length === 0}>Enregistrer</Button>
           </div>
@@ -419,7 +420,7 @@ export function KanbanBoard({ projects, clients, employees, onProjectsChange, on
 
       {/* Lost reason prompt */}
       {lostPrompt && (
-        <div onClick={e => e.stopPropagation()} style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', zIndex: 51, width: 380, background: 'var(--bg-card)', border: '1px solid var(--border-accent)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-modal)', padding: 24 }}>
+        <div onClick={e => e.stopPropagation()} style={{ ...modalCenterStyle, zIndex: 51, width: 380, padding: 24 }}>
           <div style={{ fontSize: 'var(--fs-base)', fontWeight: 600, marginBottom: 4 }}>Raison de perte</div>
           <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 16 }}>Obligatoire pour passer en Lost.</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

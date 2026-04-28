@@ -25,6 +25,11 @@ import type { Project, Client } from '@/types/sales'
 import { CLOSED_WON, CLOSED_LOST, fmtCurrency, winFactor } from '@/types/sales'
 
 type Tab = 'pipeline' | 'forecast' | 'clients' | 'settings'
+type IssueLevel = 'critical' | 'warning' | 'info'
+interface SalesIssue { level: IssueLevel; source: 'projects' | 'clients'; entity: string; field: string; message: string }
+
+const THEME_ICONS = { auto: Monitor, dark: Moon, light: Sun } as const
+const LEVEL_ORDER: Record<IssueLevel, number> = { critical: 0, warning: 1, info: 2 }
 
 const BG_IMAGES = [
   '/assets/backgrounds/bg-ice-surface-light.jpg',
@@ -34,6 +39,27 @@ const BG_IMAGES = [
   '/assets/backgrounds/bg-confluence-streams.jpg',
   '/assets/backgrounds/bg-glacial-teal-copper.jpg',
 ]
+
+function ChartCard({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
+  return (
+    <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 20 }}>
+      <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: sub ? 4 : 16 }}>{title}</div>
+      {sub && <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 16 }}>{sub}</div>}
+      {children}
+    </div>
+  )
+}
+
+function KpiStat({ value, label, color, icon: Icon }: { value: number; label: string; color: string; icon: React.ElementType }) {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ fontSize: 22, fontWeight: 800, color, fontFamily: 'monospace' }}>{value}</div>
+      <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3 }}>
+        <Icon size={10} color={color} /> {label}
+      </div>
+    </div>
+  )
+}
 
 export default function SalesPage() {
   const { data: session } = useSession()
@@ -133,6 +159,8 @@ export default function SalesPage() {
   }
 
   // ── Loading / Error ────────────────────────────────────────────────────────
+
+  const ActiveThemeIcon = THEME_ICONS[mode]
 
   if (loading) return <EqxiaLoadingScreen appName="Sales" bgImage={bgImage} />
 
@@ -254,59 +282,46 @@ export default function SalesPage() {
 
             {/* Forecast + Funnel */}
             <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 20 }}>
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 20 }}>
-                <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 4 }}>Prévisionnel 6 mois</div>
-                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 16 }}>Basé sur Expected Close Date</div>
+              <ChartCard title="Prévisionnel 6 mois" sub="Basé sur Expected Close Date">
                 <ForecastChart projects={localProjects} />
-              </div>
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 20 }}>
-                <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 16 }}>Funnel de conversion</div>
+              </ChartCard>
+              <ChartCard title="Funnel de conversion">
                 <FunnelChart projects={localProjects} />
-              </div>
+              </ChartCard>
             </div>
 
             {/* Heatmap + Velocity */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 20 }}>
-                <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 4 }}>Deals stagnants</div>
-                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 16 }}>Par étape × ancienneté</div>
+              <ChartCard title="Deals stagnants" sub="Par étape × ancienneté">
                 <StaleHeatmap projects={localProjects} />
-              </div>
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 20 }}>
-                <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 4 }}>Velocity par étape</div>
-                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 16 }}>Temps moyen en jours (deals Won)</div>
+              </ChartCard>
+              <ChartCard title="Velocity par étape" sub="Temps moyen en jours (deals Won)">
                 <VelocityChart projects={localProjects} />
-              </div>
+              </ChartCard>
             </div>
 
             {/* Analytics row */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 20 }}>
-                <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 16 }}>Win/Loss par type</div>
+              <ChartCard title="Win/Loss par type">
                 <WinLossBySegment projects={localProjects} />
-              </div>
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 20 }}>
-                <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 16 }}>Performance par owner</div>
+              </ChartCard>
+              <ChartCard title="Performance par owner">
                 <OwnerPerformance projects={localProjects} />
-              </div>
+              </ChartCard>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 20 }}>
-                <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 4 }}>Priorité × Ancienneté</div>
-                <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginBottom: 16 }}>Taille = montant · Couleur = health</div>
+              <ChartCard title="Priorité × Ancienneté" sub="Taille = montant · Couleur = health">
                 <ScatterRisk projects={localProjects} />
-              </div>
-              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 20 }}>
-                <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 16 }}>Cohortes par mois de création</div>
+              </ChartCard>
+              <ChartCard title="Cohortes par mois de création">
                 <CohortChart projects={localProjects} />
-              </div>
+              </ChartCard>
             </div>
 
-            <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', padding: 20 }}>
-              <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 16 }}>Source d&apos;acquisition</div>
+            <ChartCard title="Source d'acquisition">
               <SourceChart projects={localProjects} />
-            </div>
+            </ChartCard>
           </div>
         )}
 
@@ -391,7 +406,7 @@ export default function SalesPage() {
               <div onClick={() => setThemeOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 98 }} />
               <div style={{ position: 'absolute', bottom: 'calc(100% + 8px)', left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', gap: 4, zIndex: 99, background: 'var(--bg-panel)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid var(--border-panel)', borderRadius: 10, padding: 4, boxShadow: 'var(--shadow-card)' }}>
                 {(['auto', 'dark', 'light'] as const).map(m => {
-                  const Icon = ({ auto: Monitor, dark: Moon, light: Sun } as const)[m]
+                  const Icon = THEME_ICONS[m]
                   const active = mode === m
                   return (
                     <button key={m} onClick={() => { setTheme(m); setThemeOpen(false) }} style={{ width: 36, height: 36, background: active ? 'var(--accent-soft)' : 'none', border: 'none', borderLeft: active ? '2px solid var(--accent)' : '2px solid transparent', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background 0.2s', opacity: active ? 1 : 0.5, color: 'var(--text-primary)' }}>
@@ -403,7 +418,7 @@ export default function SalesPage() {
             </>
           )}
           <button onClick={() => setThemeOpen(t => !t)} title="Thème" style={{ width: 36, height: 36, background: 'var(--bg-panel)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', border: '1px solid var(--border-panel)', borderRadius: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--shadow-card)', color: 'var(--text-primary)' }}>
-            {{ auto: <Monitor size={15} />, dark: <Moon size={15} />, light: <Sun size={15} /> }[mode]}
+            <ActiveThemeIcon size={15} />
           </button>
         </div>
       </div>
@@ -413,9 +428,6 @@ export default function SalesPage() {
 
 // ── SalesSettings ─────────────────────────────────────────────────────────
 
-type IssueLevel = 'critical' | 'warning' | 'info'
-interface SalesIssue { level: IssueLevel; source: 'projects' | 'clients'; entity: string; field: string; message: string }
-
 const NOTION_BASES: { label: string; env: string; id?: string; color: string }[] = [
   { label: 'Projects', env: 'NOTION_PROJECTS_DB_ID', id: 'c0167047-f3c2-45c3-99bd-6c170d207a96', color: '#3b82f6' },
   { label: 'Clients', env: 'NOTION_CLIENTS_DB_ID', id: '942e7bc6-f656-43c8-9af2-71a1365a060e', color: '#10b981' },
@@ -424,6 +436,27 @@ const NOTION_BASES: { label: string; env: string; id?: string; color: string }[]
 ]
 
 function notionUrl(id: string) { return `https://notion.so/${id.replace(/-/g, '')}` }
+
+function validateProject(p: Project): SalesIssue[] {
+  const out: SalesIssue[] = []
+  const name = p.name || p.id
+  if (!p.type) out.push({ level: 'critical', source: 'projects', entity: name, field: 'Type', message: 'Type de projet non renseigné' })
+  if (!p.quotedAmount || p.quotedAmount === 0) out.push({ level: 'critical', source: 'projects', entity: name, field: 'Quoted Amount', message: 'Montant devisé absent — deal non valorisé dans le forecast' })
+  if (!p.expectedCloseDate && !p.endDate) out.push({ level: 'warning', source: 'projects', entity: name, field: 'Expected Close Date', message: 'Pas de date de clôture — classé en fallback +3 mois dans le forecast' })
+  if ((!p.winPercent || p.winPercent === 0) && (!p.winAuto || p.winAuto === 0)) out.push({ level: 'critical', source: 'projects', entity: name, field: 'Win %', message: 'Aucun win % (ni gut feeling ni auto) — forecast pondéré = 0' })
+  if (!p.ownerName) out.push({ level: 'warning', source: 'projects', entity: name, field: 'Owner', message: 'Responsable non renseigné' })
+  if (!p.clientName || p.clientName === 'N/A') out.push({ level: 'warning', source: 'projects', entity: name, field: 'Client', message: 'Aucun client lié au deal' })
+  return out
+}
+
+function validateClient(c: Client): SalesIssue[] {
+  const out: SalesIssue[] = []
+  const name = c.name || c.id
+  if (!c.satisfaction) out.push({ level: 'warning', source: 'clients', entity: name, field: 'Satisfaction', message: 'Score de satisfaction absent' })
+  if (!c.relationshipOwner) out.push({ level: 'warning', source: 'clients', entity: name, field: 'Relationship Owner', message: 'Responsable relation absent' })
+  if (!c.health) out.push({ level: 'info', source: 'clients', entity: name, field: 'Health', message: 'Indicateur santé non calculé' })
+  return out
+}
 
 function IssueIcon({ level }: { level: IssueLevel }) {
   if (level === 'critical') return <AlertOctagon size={13} color="#ef4444" style={{ flexShrink: 0 }} />
@@ -435,28 +468,12 @@ function SalesSettings({ projects, clients }: { projects: Project[]; clients: Cl
   const [levelFilter, setLevelFilter] = useState<'all' | 'critical' | 'warning'>('critical')
   const [sourceFilter, setSourceFilter] = useState<'all' | 'projects' | 'clients'>('all')
 
+  const activeProjects = projects.filter(p => !['Lost', 'Cancelled'].includes(p.status))
+
   const issues = useMemo<SalesIssue[]>(() => {
-    const out: SalesIssue[] = []
-    const skip = new Set(['Lost', 'Cancelled'])
-
-    projects.filter(p => !skip.has(p.status)).forEach(p => {
-      const name = p.name || p.id
-      if (!p.type) out.push({ level: 'critical', source: 'projects', entity: name, field: 'Type', message: 'Type de projet non renseigné' })
-      if (!p.quotedAmount || p.quotedAmount === 0) out.push({ level: 'critical', source: 'projects', entity: name, field: 'Quoted Amount', message: 'Montant devisé absent — deal non valorisé dans le forecast' })
-      if (!p.expectedCloseDate && !p.endDate) out.push({ level: 'warning', source: 'projects', entity: name, field: 'Expected Close Date', message: 'Pas de date de clôture — classé en fallback +3 mois dans le forecast' })
-      if ((!p.winPercent || p.winPercent === 0) && (!p.winAuto || p.winAuto === 0)) out.push({ level: 'critical', source: 'projects', entity: name, field: 'Win %', message: 'Aucun win % (ni gut feeling ni auto) — forecast pondéré = 0' })
-      if (!p.ownerName) out.push({ level: 'warning', source: 'projects', entity: name, field: 'Owner', message: 'Responsable non renseigné' })
-      if (!p.clientName || p.clientName === 'N/A') out.push({ level: 'warning', source: 'projects', entity: name, field: 'Client', message: 'Aucun client lié au deal' })
-    })
-
-    clients.forEach(c => {
-      const name = c.name || c.id
-      if (!c.satisfaction) out.push({ level: 'warning', source: 'clients', entity: name, field: 'Satisfaction', message: 'Score de satisfaction absent' })
-      if (!c.relationshipOwner) out.push({ level: 'warning', source: 'clients', entity: name, field: 'Relationship Owner', message: 'Responsable relation absent' })
-      if (!c.health) out.push({ level: 'info', source: 'clients', entity: name, field: 'Health', message: 'Indicateur santé non calculé' })
-    })
-
-    return out.sort((a, b) => ({ critical: 0, warning: 1, info: 2 }[a.level] - ({ critical: 0, warning: 1, info: 2 }[b.level])))
+    const active = projects.filter(p => !['Lost', 'Cancelled'].includes(p.status))
+    const out = [...active.flatMap(validateProject), ...clients.flatMap(validateClient)]
+    return out.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level])
   }, [projects, clients])
 
   const filtered = issues.filter(i => {
@@ -469,6 +486,7 @@ function SalesSettings({ projects, clients }: { projects: Project[]; clients: Cl
     critical: issues.filter(i => i.level === 'critical').length,
     warning: issues.filter(i => i.level === 'warning').length,
   }
+  const countOk = Math.max(0, activeProjects.length + clients.length - counts.critical - counts.warning)
 
   const cardStyle: React.CSSProperties = { background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-card)', overflow: 'hidden' }
   const segBtnStyle = (active: boolean): React.CSSProperties => ({
@@ -520,22 +538,13 @@ function SalesSettings({ projects, clients }: { projects: Project[]; clients: Cl
             <div>
               <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, marginBottom: 2 }}>🩺 DB Review</div>
               <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
-                Qualité des données Notion · {projects.filter(p => !['Lost','Cancelled'].includes(p.status)).length} projets actifs · {clients.length} clients
+                Qualité des données Notion · {activeProjects.length} projets actifs · {clients.length} clients
               </div>
             </div>
             <div style={{ display: 'flex', gap: 20, flexShrink: 0 }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#ef4444', fontFamily: 'monospace' }}>{counts.critical}</div>
-                <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3 }}><AlertOctagon size={10} color="#ef4444" /> Critical</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#facc15', fontFamily: 'monospace' }}>{counts.warning}</div>
-                <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={10} color="#facc15" /> Warning</div>
-              </div>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: '#4ade80', fontFamily: 'monospace' }}>{Math.max(0, (projects.filter(p => !['Lost','Cancelled'].includes(p.status)).length + clients.length) - counts.critical - counts.warning)}</div>
-                <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 3 }}><CheckCircle2 size={10} color="#4ade80" /> OK</div>
-              </div>
+              <KpiStat value={counts.critical} label="Critical" color="#ef4444" icon={AlertOctagon} />
+              <KpiStat value={counts.warning} label="Warning" color="#facc15" icon={AlertTriangle} />
+              <KpiStat value={countOk} label="OK" color="#4ade80" icon={CheckCircle2} />
             </div>
           </div>
         </div>
