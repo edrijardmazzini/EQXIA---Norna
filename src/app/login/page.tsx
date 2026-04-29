@@ -32,8 +32,8 @@ function LoginContent() {
       <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.5)' }} />
       <div style={{ position: 'relative', zIndex: 1, textAlign: 'center', maxWidth: 360, padding: 40 }}>
         <img src="/assets/logos/eqxia-logo-teal-transparent.png" alt="EQXIA" style={{ height: 160, marginBottom: 28, display: 'block', marginLeft: 'auto', marginRight: 'auto' }} />
-        <div style={{ color: '#d0e1e2', fontSize: 28, fontWeight: 800, letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: 6 }}>Plutus</div>
-        <div style={{ color: '#87A0A4', fontSize: 13, marginBottom: 32 }}>Dashboard financier</div>
+        <div style={{ color: '#d0e1e2', fontSize: 28, fontWeight: 800, letterSpacing: '0.18em', textTransform: 'uppercase', marginBottom: 6 }}>Concordia</div>
+        <div style={{ color: '#87A0A4', fontSize: 13, marginBottom: 32 }}>CRM & Pipeline</div>
         {error && (
           <div style={{ background: 'rgba(248,113,113,0.15)', border: '1px solid rgba(248,113,113,0.3)', borderRadius: 8, padding: '10px 16px', marginBottom: 20, color: '#f87171', fontSize: 12 }}>
             Accès refusé — Réservé aux comptes @eqxia.com

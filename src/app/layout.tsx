@@ -3,8 +3,8 @@ import SessionProvider from '@/components/providers/SessionProvider'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Eqxia — Plutus',
-  description: 'Dashboard financier — Eqxia',
+  title: 'Eqxia — Concordia',
+  description: 'CRM & Pipeline — Eqxia',
   icons: { icon: '/eqxia-plutus-favicon.svg' },
 }
 

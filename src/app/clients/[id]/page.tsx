@@ -1,12 +1,11 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { Spinner } from '@/components/ui/Spinner'
 import { ClientDetail } from '@/components/sales/ClientDetail'
 import { useProjectsData } from '@/hooks/useProjectsData'
-import type { Client } from '@/types/sales'
 
 export default function ClientPage() {
   const { id } = useParams<{ id: string }>()
@@ -36,7 +35,7 @@ export default function ClientPage() {
     return (
       <div style={{ minHeight: '100vh', background: 'var(--bg-page)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
         <div style={{ color: 'var(--text-muted)' }}>Client introuvable</div>
-        <button onClick={() => router.push('/sales')} style={{ padding: '8px 16px', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-btn)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
+        <button onClick={() => router.push('/')} style={{ padding: '8px 16px', background: 'var(--bg-card)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-btn)', color: 'var(--text-secondary)', cursor: 'pointer' }}>
           ← Retour
         </button>
       </div>
@@ -46,9 +45,9 @@ export default function ClientPage() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-page)', color: 'var(--text-primary)' }}>
       <AppHeader
-        appName="Sales — Client"
+        appName="Concordia — Client"
         right={
-          <button onClick={() => router.push('/sales?tab=clients')} style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: 'var(--radius-btn)', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', cursor: 'pointer' }}>
+          <button onClick={() => router.push('/?tab=clients')} style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: 'var(--radius-btn)', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', cursor: 'pointer' }}>
             ← Clients
           </button>
         }
@@ -57,7 +56,7 @@ export default function ClientPage() {
         <ClientDetail
           client={client}
           projects={projects}
-          onClose={() => router.push('/sales?tab=clients')}
+          onClose={() => router.push('/?tab=clients')}
           inline
         />
       </div>
