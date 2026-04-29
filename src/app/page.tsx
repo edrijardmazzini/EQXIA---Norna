@@ -270,10 +270,8 @@ export default function ConcordiaPage() {
                 <KPICard label="Deals actifs" value={String(pipelineDeals.length)} sub="Lead → Verbal Commitment" />
                 <KPICard label="Win rate 90j" value={`${kpiWinRate}%`} sub="Won / (Won + Lost)" accent={kpiWinRate >= 50} />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 'var(--gap-grid)' }}>
-                <ChartCard title="Prévisionnel" sub="Basé sur Expected Close Date"><ForecastChart projects={localProjects} /></ChartCard>
-                <ChartCard title="Funnel de conversion"><FunnelChart projects={localProjects} /></ChartCard>
-              </div>
+              <ChartCard title="Prévisionnel" sub="Basé sur Expected Close Date"><ForecastChart projects={localProjects} /></ChartCard>
+              <ChartCard title="Funnel de conversion"><FunnelChart projects={localProjects} /></ChartCard>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 'var(--gap-grid)' }}>
                 <ChartCard title="Deals stagnants" sub="Par étape × ancienneté"><StaleHeatmap projects={localProjects} /></ChartCard>
                 <ChartCard title="Velocity par étape" sub="Temps moyen en jours (deals Won)"><VelocityChart projects={localProjects} /></ChartCard>
