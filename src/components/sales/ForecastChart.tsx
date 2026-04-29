@@ -20,7 +20,7 @@ type ChartType = 'line' | 'bar'
 type Period = '3m' | '6m' | '12m' | 'fy'
 
 const MOIS = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun', 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
-const TOTAL_COLOR = '#e2e8f0'
+const TOTAL_COLOR = '#ffffff'
 const AXIS_TICK_STYLE = { fill: 'var(--text-muted)', fontSize: 11 }
 
 function getWeight(p: Project, mode: WeightMode): number {
@@ -289,9 +289,9 @@ export function ForecastChart({ projects }: ForecastChartProps) {
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
           <XAxis dataKey="label" tick={AXIS_TICK_STYLE} axisLine={false} tickLine={false} />
           <YAxis tick={AXIS_TICK_STYLE} axisLine={false} tickLine={false} tickFormatter={v => fmtCurrency(v as number)} width={72} />
-          <Tooltip content={tooltipContent} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+          <Tooltip content={tooltipContent} cursor={{ fill: 'rgba(255,255,255,0.03)' }} wrapperStyle={{ zIndex: 50 }} />
           <Legend
-            wrapperStyle={{ fontSize: 11, paddingTop: 10 }}
+            wrapperStyle={{ fontSize: 11, paddingTop: 10, zIndex: 0, position: 'relative' }}
             formatter={legendFormatter}
             onMouseEnter={e => setHoveredKey((e as { dataKey?: string }).dataKey ?? null)}
             onMouseLeave={() => setHoveredKey(null)}
@@ -316,12 +316,11 @@ export function ForecastChart({ projects }: ForecastChartProps) {
             type="monotone"
             dataKey="_total"
             stroke={TOTAL_COLOR}
-            strokeWidth={2}
-            strokeDasharray="5 3"
+            strokeWidth={3}
             dot={false}
-            activeDot={{ r: 4, fill: TOTAL_COLOR, strokeWidth: 0 }}
+            activeDot={{ r: 5, fill: TOTAL_COLOR, strokeWidth: 0 }}
             name="_total"
-            strokeOpacity={hoveredKey && hoveredKey !== '_total' ? 0.2 : 1}
+            strokeOpacity={hoveredKey && hoveredKey !== '_total' ? 0.15 : 1}
           />
         </ComposedChart>
       </ResponsiveContainer>
