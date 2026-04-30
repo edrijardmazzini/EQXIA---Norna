@@ -2,15 +2,15 @@
 
 import { usePathname } from 'next/navigation'
 import Link from 'next/link'
-import { CalendarDays, BarChart3, Umbrella, User, Zap, BrainCircuit } from 'lucide-react'
+import { CalendarDays, BarChart3, Umbrella, User, Zap, BrainCircuit, Briefcase } from 'lucide-react'
 
 const NAV_ITEMS = [
   { href: '/workplace',          label: 'Planification',  icon: CalendarDays },
   { href: '/workplace/capacity', label: 'Capacité',       icon: BarChart3 },
+  { href: '/workplace/projects', label: 'Projets',        icon: Briefcase },
   { href: '/workplace/leaves',   label: 'Congés',         icon: Umbrella },
   { href: '/workplace/me',       label: 'Mon dashboard',  icon: User },
   { href: '/workplace/ai',       label: 'Assistant IA',   icon: BrainCircuit },
-  { href: '/workplace/signals',  label: 'Signaux',        icon: Zap },
 ] as const
 
 export function WorkplaceSidebar() {

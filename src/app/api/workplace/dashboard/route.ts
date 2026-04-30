@@ -5,6 +5,7 @@ const NOTION_VERSION = '2022-06-28'
 const EMPLOYEES_DB_ID   = process.env.NOTION_EMPLOYEES_DB_ID   || '107cb251-a49b-45c3-806e-b0edf20f44ec'
 const PROJECTS_DB_ID    = process.env.NOTION_PROJECTS_DB_ID    || '15933668-ad6e-49ea-902b-1c6bc2bce3dc'
 const ALLOCATIONS_DB_ID = process.env.NOTION_ALLOCATIONS_DB_ID || '7ae1822f-dfd0-41e0-9098-c03b97f93bd5'
+const CLIENTS_DB_ID     = process.env.NOTION_CLIENTS_DB_ID     || '1c4a4860-b36e-4ca2-a243-57446accbe53'
 
 function headers() {
   return {
@@ -77,22 +78,30 @@ const ACTIVE_PROJECT_STATUSES = new Set([
 
 export async function GET() {
   try {
-    const [employeesRaw, projectsRaw, allocationsRaw] = await Promise.all([
-      queryAll(EMPLOYEES_DB_ID, {
-        property: 'Status',
-        select: { equals: 'Active' },
-      }),
+    const [employeesRaw, projectsRaw, allocationsRaw, clientsRaw] = await Promise.all([
+      queryAll(EMPLOYEES_DB_ID),
       queryAll(PROJECTS_DB_ID),
       queryAll(ALLOCATIONS_DB_ID),
+      queryAll(CLIENTS_DB_ID),
     ])
 
-    // employees
-    const employees: WorkplaceEmployee[] = employeesRaw
+    // Full employees lookup (incluant les Departed pour résoudre les owners legacy)
+    const employeesMap: Record<string, string> = {}
+    const allEmployees = employeesRaw
       .map((e: any) => {
         const props = e.properties as Record<string, any>
         const titleProp = Object.values(props).find((p: any) => p.type === 'title') as any
         const name = titleProp?.title?.map((t: any) => t.plain_text).join('').trim() || ''
-        if (!name) return null
+        if (name) employeesMap[e.id] = name
+        return { raw: e, name, status: getSelect(props['Status']) }
+      })
+      .filter(x => x.name)
+
+    // Active employees only (returned to front)
+    const employees: WorkplaceEmployee[] = allEmployees
+      .filter(x => x.status === 'Active')
+      .map(({ raw: e, name }) => {
+        const props = e.properties as Record<string, any>
         return {
           id: e.id,
           name,
@@ -108,26 +117,44 @@ export async function GET() {
           leaveMedConsoCurrentY: getNumber(props['CurrentY Conso Med&Others DAYS']),
         } satisfies WorkplaceEmployee
       })
-      .filter(Boolean) as WorkplaceEmployee[]
+
+    // Clients lookup
+    const clientsMap: Record<string, string> = {}
+    for (const c of clientsRaw) {
+      const titleProp = Object.values(c.properties as Record<string, any>).find((p: any) => p.type === 'title') as any
+      const name = titleProp?.title?.map((t: any) => t.plain_text).join('').trim() || ''
+      if (name) clientsMap[c.id] = name
+    }
 
     // projects lookup + list
     const projectsMap: Record<string, { name: string; type: string }> = {}
     const projects: WorkplaceProject[] = projectsRaw
       .map((p: any) => {
-        const props = p.properties as Record<string, any>
+        const props  = p.properties as Record<string, any>
         const name   = getText(props['Name'])
         const status = getSelect(props['Status'])
         const type   = getSelect(props['Type'])
         if (name) projectsMap[p.id] = { name, type }
         if (!ACTIVE_PROJECT_STATUSES.has(status)) return null
+
+        const ownerIds = getRelationIds(props['Owner'])
+        const ownerName = ownerIds.map(id => employeesMap[id] || '').filter(Boolean).join(', ')
+        const clientIds = getRelationIds(props['Client'])
+        const clientName = clientIds.map(id => clientsMap[id] || '').filter(Boolean).join(', ')
+
         return {
           id: p.id,
           name,
           type,
           status,
-          startDate:  getDate(props['Start Date']),
-          endDate:    getDate(props['End Date']),
-          ownerName:  '',
+          phase:       getSelect(props['Phase']),
+          clientName,
+          startDate:   getDate(props['Start Date']),
+          endDate:     getDate(props['End Date']),
+          deadline:    getDate(props['Deadline']) || getDate(props['Expected Close Date']),
+          ownerName,
+          ownerIds,
+          health:      props['Health']?.formula?.string || '',
         } satisfies WorkplaceProject
       })
       .filter(Boolean) as WorkplaceProject[]

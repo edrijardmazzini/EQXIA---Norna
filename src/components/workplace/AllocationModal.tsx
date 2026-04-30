@@ -17,6 +17,7 @@ interface Props {
   projects: WorkplaceProject[]
   existing?: Allocation
   defaultPersonId?: string
+  defaultProjectId?: string
   defaultDate?: string
   onClose: () => void
   onSaved: () => void
@@ -47,12 +48,12 @@ function todayYMD(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export function AllocationModal({ employees, projects, existing, defaultPersonId, defaultDate, onClose, onSaved }: Props) {
+export function AllocationModal({ employees, projects, existing, defaultPersonId, defaultProjectId, defaultDate, onClose, onSaved }: Props) {
   const isEdit = !!existing
 
   const [type, setType] = useState<AllocationType>(existing?.type || 'Project')
   const [personId, setPersonId] = useState(existing?.personIds[0] || defaultPersonId || employees[0]?.id || '')
-  const [projectId, setProjectId] = useState(existing?.projectIds[0] || projects[0]?.id || '')
+  const [projectId, setProjectId] = useState(existing?.projectIds[0] || defaultProjectId || projects[0]?.id || '')
   const [startDate, setStartDate] = useState(existing?.startDate || defaultDate || todayYMD())
   const [startHalf, setStartHalf] = useState<HalfDay>(existing?.startHalf || 'Morning')
   const [endDate, setEndDate] = useState(existing?.endDate || defaultDate || todayYMD())

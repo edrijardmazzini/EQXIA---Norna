@@ -18,9 +18,14 @@ export interface WorkplaceProject {
   name: string
   type: string
   status: string
+  phase: string
+  clientName: string
   startDate: string
   endDate: string
+  deadline: string
   ownerName: string
+  ownerIds: string[]
+  health: string
 }
 
 export type AllocationType = 'Project' | 'Leave' | 'Public Holiday'
