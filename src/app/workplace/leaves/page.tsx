@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { Plus, Check, X, Lock } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
@@ -194,7 +195,9 @@ export default function LeavesPage() {
                 <div key={req.id} style={{ padding: '14px 18px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                   <div>
                     <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      {emp?.name || '?'}
+                      {emp ? (
+                        <Link href={`/workplace/people/${emp.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>{emp.name}</Link>
+                      ) : '?'}
                       <span style={{ marginLeft: 8, padding: '2px 8px', borderRadius: 'var(--radius-badge)', background: 'var(--accent-soft)', color: 'var(--accent)', fontSize: 'var(--fs-2xs)', fontWeight: 600 }}>
                         {LEAVE_TYPE_LABELS[req.leaveType] || req.leaveType}
                       </span>
@@ -300,7 +303,9 @@ export default function LeavesPage() {
             <tbody>
               {soldes.map((row, idx) => (
                 <tr key={row.emp.id} style={{ borderTop: '1px solid var(--border-subtle)', background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
-                  <td style={{ padding: '8px 14px', fontWeight: 600 }}>{row.emp.name}</td>
+                  <td style={{ padding: '8px 14px', fontWeight: 600 }}>
+                    <Link href={`/workplace/people/${row.emp.id}`} style={{ color: 'inherit', textDecoration: 'none' }}>{row.emp.name}</Link>
+                  </td>
                   <td style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'monospace' }}>{row.quotaAnnual || '—'}</td>
                   <td style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'monospace' }}>{row.takenAnnual.toFixed(1)}</td>
                   <td style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'monospace', color: row.pendingAnnual > 0 ? 'var(--color-warning)' : 'inherit' }}>
@@ -337,7 +342,9 @@ export default function LeavesPage() {
             return (
               <div key={req.id} style={{ padding: '10px 18px', borderTop: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ fontSize: 'var(--fs-xs)' }}>
-                  <span style={{ fontWeight: 600 }}>{emp?.name || '?'}</span>
+                  {emp ? (
+                    <Link href={`/workplace/people/${emp.id}`} style={{ fontWeight: 600, color: 'var(--text-primary)', textDecoration: 'none' }}>{emp.name}</Link>
+                  ) : <span style={{ fontWeight: 600 }}>?</span>}
                   <span style={{ marginLeft: 8, color: 'var(--text-muted)' }}>
                     {LEAVE_TYPE_LABELS[req.leaveType] || req.leaveType} · {fmtDate(req.startDate)} → {fmtDate(req.endDate)} · {days}j
                   </span>

@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import Link from 'next/link'
 import { Plus, ChevronLeft, ChevronRight, CalendarDays, Filter } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
@@ -439,12 +440,14 @@ export default function PlanningPage() {
                     }}
                   >
                     <td style={{ padding: '0 14px', height: 36, whiteSpace: 'nowrap' }}>
-                      <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>
-                        {emp.name}
-                      </div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>
-                        {emp.role}
-                      </div>
+                      <Link href={`/workplace/people/${emp.id}`} style={{ textDecoration: 'none', display: 'block' }}>
+                        <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {emp.name}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>
+                          {emp.role}
+                        </div>
+                      </Link>
                     </td>
 
                     {cells.map((cell, ci) => {

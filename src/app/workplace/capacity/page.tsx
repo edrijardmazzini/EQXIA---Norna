@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import Link from 'next/link'
 import { AlertOctagon, AlertTriangle, TrendingDown, TrendingUp } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
@@ -222,8 +223,10 @@ export default function CapacityPage() {
                         background: empIdx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card-hover)',
                         zIndex: 1,
                       }}>
-                        <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>{emp.name}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{emp.role}</div>
+                        <Link href={`/workplace/people/${emp.id}`} style={{ textDecoration: 'none', display: 'block' }}>
+                          <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>{emp.name}</div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>{emp.role}</div>
+                        </Link>
                       </td>
                       {loads.map((load, wi) => {
                         const util = utilization(load)

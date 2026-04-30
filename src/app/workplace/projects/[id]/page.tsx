@@ -268,8 +268,10 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                         left: 0,
                         background: idx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card-hover)',
                       }}>
-                        <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600 }}>{emp.name}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{emp.role}</div>
+                        <Link href={`/workplace/people/${emp.id}`} style={{ textDecoration: 'none', display: 'block', color: 'var(--text-primary)' }}>
+                          <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600 }}>{emp.name}</div>
+                          <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{emp.role}</div>
+                        </Link>
                       </td>
                       {weekStarts.map((_, wi) => {
                         const weekCells = cells.slice(wi * 10, (wi + 1) * 10)
@@ -401,7 +403,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600 }}>
-                    {c.emp.name}
+                    <Link href={`/workplace/people/${c.emp.id}`} style={{ color: 'var(--text-primary)', textDecoration: 'none' }}>{c.emp.name}</Link>
                     <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontWeight: 400 }}>{c.emp.role} · {c.emp.pays}</span>
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
