@@ -2,14 +2,30 @@
 
 import { useMemo, useState, use } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Plus, ExternalLink, Sparkles } from 'lucide-react'
+import { ArrowLeft, Plus, ExternalLink, Sparkles, AlertCircle } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
+import { useToast } from '@/components/workplace/ToastProvider'
 import { generateGrid, coversCell, weekLabel, weekNumber, getMondayOf, type GridCell } from '@/lib/workplace/grid'
 import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
 import { skillMatch, expectedSkillsFor } from '@/lib/workplace/skills'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
 import { EqxiaLoadingScreen } from '@/components/eqxia'
 import type { Allocation, WorkplaceEmployee } from '@/types/workplace'
+
+interface AICandidate {
+  employeeId: string
+  name: string
+  score: number
+  skillScore: number
+  availabilityScore: number
+  locationScore: number
+  reasoning: string
+}
+
+interface AIResponse {
+  intent: { summary: string; dateRange: string | null; projectType: string | null; location: string | null; requiredSkills: string[] }
+  candidates: AICandidate[]
+}
 
 const WEEKS = 12
 
@@ -93,6 +109,7 @@ function scoreCandidates(
 
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params)
+  const toast = useToast()
   const { employees, projects, allocations, loading, error, reload } = useWorkplaceData()
   const [modalState, setModalState] = useState<
     | { mode: 'closed' }
@@ -100,7 +117,60 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     | { mode: 'edit'; allocation: Allocation }
   >({ mode: 'closed' })
 
+  // AI candidates state
+  const [candidatesMode, setCandidatesMode] = useState<'auto' | 'ai'>('auto')
+  const [aiCandidates, setAiCandidates] = useState<AIResponse | null>(null)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState('')
+
   const project = useMemo(() => projects.find(p => p.id === projectId), [projects, projectId])
+
+  // Build a context-aware AI query for this project
+  function buildAIQuery(): string {
+    if (!project) return ''
+    const parts: string[] = [
+      `Qui sont les meilleurs candidats pour le projet "${project.name}"`,
+    ]
+    if (project.type) parts.push(`(type ${project.type})`)
+    if (project.clientName) parts.push(`pour le client ${project.clientName}`)
+    if (project.startDate && project.endDate) {
+      parts.push(`sur la période du ${project.startDate} au ${project.endDate}`)
+    } else if (project.startDate) {
+      parts.push(`à partir du ${project.startDate}`)
+    } else if (project.deadline) {
+      parts.push(`avant la deadline du ${project.deadline}`)
+    }
+    parts.push('?')
+    return parts.join(' ')
+  }
+
+  async function fetchAICandidates() {
+    if (!project) return
+    setAiLoading(true)
+    setAiError('')
+    try {
+      const res = await fetch('/api/workplace/ai/staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: buildAIQuery() }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      setAiCandidates(data)
+      toast.success(`Claude a trouvé ${data.candidates.length} candidat${data.candidates.length > 1 ? 's' : ''}`)
+    } catch (e) {
+      const msg = (e as Error).message
+      setAiError(msg)
+      toast.error(`Erreur IA : ${msg}`)
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  function switchToAI() {
+    setCandidatesMode('ai')
+    if (!aiCandidates && !aiLoading) fetchAICandidates()
+  }
 
   const projectAllocations = useMemo(
     () => allocations.filter(a => a.type === 'Project' && a.projectIds.includes(projectId)),
@@ -371,17 +441,156 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
 
       {/* Available candidates */}
       <div style={{ ...CARD_STYLE, padding: 0 }}>
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}>
-          <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }}>Candidats disponibles</div>
-          <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', marginTop: 2 }}>
-            Top {candidates.length} non-staffés, scorés sur compétences × disponibilité (12 prochaines semaines)
-            {' · '}
-            <Link href="/workplace/ai" style={{ color: 'var(--accent)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
-              <Sparkles size={10} /> Affiner avec l'IA
-            </Link>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }}>Candidats disponibles</div>
+            <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', marginTop: 2 }}>
+              {candidatesMode === 'auto'
+                ? `Top ${candidates.length} non-staffés, scorés sur compétences × disponibilité (12 prochaines semaines)`
+                : 'Recommandation contextuelle Claude basée sur le projet, l\'équipe et les allocations'}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 2, padding: 2, background: 'var(--bg-input)', borderRadius: 'var(--radius-btn)', flexShrink: 0 }}>
+            <button
+              onClick={() => setCandidatesMode('auto')}
+              style={{
+                padding: '4px 10px',
+                borderRadius: 'var(--radius-btn)',
+                border: 'none',
+                background: candidatesMode === 'auto' ? 'var(--bg-card)' : 'transparent',
+                color: candidatesMode === 'auto' ? 'var(--accent)' : 'var(--text-muted)',
+                fontSize: 'var(--fs-2xs)',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              Match auto
+            </button>
+            <button
+              onClick={switchToAI}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                padding: '4px 10px',
+                borderRadius: 'var(--radius-btn)',
+                border: 'none',
+                background: candidatesMode === 'ai' ? 'var(--bg-card)' : 'transparent',
+                color: candidatesMode === 'ai' ? 'var(--accent)' : 'var(--text-muted)',
+                fontSize: 'var(--fs-2xs)',
+                fontWeight: 600,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              <Sparkles size={10} /> Avec IA
+            </button>
           </div>
         </div>
-        {candidates.length === 0 ? (
+
+        {candidatesMode === 'ai' ? (
+          aiLoading ? (
+            <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                <span style={{
+                  width: 14, height: 14, borderRadius: '50%',
+                  border: '2px solid var(--accent-soft)',
+                  borderTopColor: 'var(--accent)',
+                  animation: 'spin 0.8s linear infinite',
+                  display: 'inline-block',
+                }} />
+                Claude analyse l'équipe et les allocations…
+              </span>
+            </div>
+          ) : aiError ? (
+            <div style={{ padding: 24, display: 'flex', alignItems: 'flex-start', gap: 10, color: 'var(--color-error)' }}>
+              <AlertCircle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600 }}>Erreur IA</div>
+                <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', marginTop: 2, fontFamily: 'monospace' }}>{aiError}</div>
+                <button onClick={fetchAICandidates} style={{ marginTop: 8, padding: '4px 10px', borderRadius: 'var(--radius-btn)', border: '1px solid var(--accent)', background: 'var(--accent-soft)', color: 'var(--accent)', fontSize: 'var(--fs-2xs)', fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+                  Réessayer
+                </button>
+              </div>
+            </div>
+          ) : aiCandidates ? (
+            <>
+              <div style={{ padding: '10px 18px', background: 'var(--bg-input)', borderBottom: '1px solid var(--border-subtle)', fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                {aiCandidates.intent.summary}
+              </div>
+              {aiCandidates.candidates.length === 0 ? (
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)' }}>
+                  Aucun candidat trouvé par l'IA.
+                </div>
+              ) : (
+                aiCandidates.candidates.map((c, idx) => {
+                  const scoreColor =
+                    c.score >= 80 ? '#22c55e' :
+                    c.score >= 60 ? '#facc15' :
+                    c.score >= 40 ? '#f97316' : '#ef4444'
+                  const emp = employeesById.get(c.employeeId)
+                  return (
+                    <div key={c.employeeId} style={{ padding: '12px 18px', borderTop: idx === 0 ? 'none' : '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <div style={{
+                        width: 22, height: 22, borderRadius: 11,
+                        background: idx === 0 ? 'var(--accent)' : 'var(--accent-soft)',
+                        color: idx === 0 ? 'var(--bg-page)' : 'var(--accent)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 10, fontWeight: 700, flexShrink: 0,
+                      }}>
+                        {idx + 1}
+                      </div>
+                      <div style={{
+                        width: 40, height: 40, borderRadius: 20,
+                        background: `${scoreColor}22`, border: `2px solid ${scoreColor}`,
+                        color: scoreColor, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontWeight: 700, fontSize: 'var(--fs-xs)', fontFamily: 'monospace', flexShrink: 0,
+                      }}>
+                        {c.score}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600 }}>
+                          {emp ? <Link href={`/workplace/people/${emp.id}`} style={{ color: 'var(--text-primary)', textDecoration: 'none' }}>{c.name}</Link> : c.name}
+                          {emp && (
+                            <span style={{ marginLeft: 8, color: 'var(--text-muted)', fontWeight: 400 }}>
+                              {emp.role}{emp.pays ? ` · ${emp.pays}` : ''}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.4 }}>
+                          {c.reasoning}
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, fontFamily: 'monospace' }}>
+                          Compétences {c.skillScore}/40 · Dispo {c.availabilityScore}/40 · Pays {c.locationScore}/20
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setModalState({ mode: 'create', personId: c.employeeId })}
+                        style={{
+                          padding: '5px 11px',
+                          borderRadius: 'var(--radius-btn)',
+                          border: '1px solid var(--border-subtle)',
+                          background: 'var(--accent-soft)',
+                          color: 'var(--accent)',
+                          fontSize: 'var(--fs-2xs)',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          fontFamily: 'inherit',
+                          flexShrink: 0,
+                        }}
+                      >
+                        Allouer
+                      </button>
+                    </div>
+                  )
+                })
+              )}
+            </>
+          ) : (
+            <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)' }}>
+              Cliquez sur "Avec IA" pour lancer une recommandation contextuelle.
+            </div>
+          )
+        ) : candidates.length === 0 ? (
           <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', fontStyle: 'italic' }}>
             Toute l'équipe est déjà staffée sur ce projet.
           </div>
