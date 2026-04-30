@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { href: '/workplace',          label: 'Planification',  icon: CalendarDays },
   { href: '/workplace/capacity', label: 'Capacité',       icon: BarChart3 },
   { href: '/workplace/projects', label: 'Projets',        icon: Briefcase },
+  { href: '/workplace/signals',  label: 'Signaux',        icon: Zap },
   { href: '/workplace/leaves',   label: 'Congés',         icon: Umbrella },
   { href: '/workplace/me',       label: 'Mon dashboard',  icon: User },
   { href: '/workplace/ai',       label: 'Assistant IA',   icon: BrainCircuit },
