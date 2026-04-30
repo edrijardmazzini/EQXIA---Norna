@@ -153,8 +153,8 @@ export function AllocationModal({ employees, projects, allocations, existing, de
       }
 
       const url = isEdit
-        ? `/api/workplace/allocations/${existing!.id}`
-        : '/api/workplace/allocations'
+        ? `/api/allocations/${existing!.id}`
+        : '/api/allocations'
       const method = isEdit ? 'PATCH' : 'POST'
 
       const res = await fetch(url, {
@@ -184,7 +184,7 @@ export function AllocationModal({ employees, projects, allocations, existing, de
     setDeleting(true)
     setError('')
     try {
-      const res = await fetch(`/api/workplace/allocations/${existing.id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/allocations/${existing.id}`, { method: 'DELETE' })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error || `HTTP ${res.status}`)

@@ -30,7 +30,7 @@ export function useWorkplaceData(): UseWorkplaceDataReturn {
     else                        setRefreshing(true)
     setError('')
 
-    fetch('/api/workplace/dashboard', { signal: ctrl.signal, cache: 'no-store' })
+    fetch('/api/dashboard', { signal: ctrl.signal, cache: 'no-store' })
       .then(r => {
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json() as Promise<WorkplaceDashboard>

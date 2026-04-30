@@ -5,13 +5,13 @@ import Link from 'next/link'
 import { CalendarDays, BarChart3, Umbrella, User, Zap, BrainCircuit, Briefcase } from 'lucide-react'
 
 const NAV_ITEMS = [
-  { href: '/workplace',          label: 'Planification',  icon: CalendarDays },
-  { href: '/workplace/capacity', label: 'Capacité',       icon: BarChart3 },
-  { href: '/workplace/projects', label: 'Projets',        icon: Briefcase },
-  { href: '/workplace/signals',  label: 'Signaux',        icon: Zap },
-  { href: '/workplace/leaves',   label: 'Congés',         icon: Umbrella },
-  { href: '/workplace/me',       label: 'Mon dashboard',  icon: User },
-  { href: '/workplace/ai',       label: 'Assistant IA',   icon: BrainCircuit },
+  { href: '/',          label: 'Planification',  icon: CalendarDays },
+  { href: '/capacity', label: 'Capacité',       icon: BarChart3 },
+  { href: '/projects', label: 'Projets',        icon: Briefcase },
+  { href: '/signals',  label: 'Signaux',        icon: Zap },
+  { href: '/leaves',   label: 'Congés',         icon: Umbrella },
+  { href: '/me',       label: 'Mon dashboard',  icon: User },
+  { href: '/ai',       label: 'Assistant IA',   icon: BrainCircuit },
 ] as const
 
 export function WorkplaceSidebar() {
@@ -52,8 +52,8 @@ export function WorkplaceSidebar() {
         </span>
       </div>
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-        const isActive = href === '/workplace'
-          ? pathname === '/workplace'
+        const isActive = href === '/'
+          ? pathname === '/'
           : pathname.startsWith(href)
         return (
           <Link

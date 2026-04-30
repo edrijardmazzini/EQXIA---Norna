@@ -4,7 +4,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Eqxia — Norna',
-  description: 'CRM & Pipeline — Eqxia',
+  description: 'Norna — Pilotage capacitaire Eqxia',
   icons: { icon: '/eqxia-plutus-favicon.svg' },
 }
 

@@ -1,23 +1,21 @@
-// ============================================================
-// app/api/dashboard/route.ts — Fetch Projects + Dépenses from Notion
-// ============================================================
-import { NextResponse } from "next/server"
+import { NextResponse } from 'next/server'
+import type { WorkplaceEmployee, WorkplaceProject, Allocation } from '@/types/workplace'
 
-const NOTION_VERSION = "2022-06-28"
-const PROJECTS_DB_ID = process.env.NOTION_PROJECTS_DB_ID || "15933668-ad6e-49ea-902b-1c6bc2bce3dc"
-const DEPENSES_DB_ID = process.env.NOTION_DEPENSES_DB_ID || process.env.NOTION_DATABASE_ID || "5a6559c5-fb2e-4074-a9f3-046f1b563827"
-const EMPLOYEES_DB_ID = process.env.NOTION_EMPLOYEES_DB_ID || "107cb251-a49b-45c3-806e-b0edf20f44ec"
-const CLIENTS_DB_ID = process.env.NOTION_CLIENTS_DB_ID || "1c4a4860-b36e-4ca2-a243-57446accbe53"
+const NOTION_VERSION = '2022-06-28'
+const EMPLOYEES_DB_ID   = process.env.NOTION_EMPLOYEES_DB_ID   || '107cb251-a49b-45c3-806e-b0edf20f44ec'
+const PROJECTS_DB_ID    = process.env.NOTION_PROJECTS_DB_ID    || '15933668-ad6e-49ea-902b-1c6bc2bce3dc'
+const ALLOCATIONS_DB_ID = process.env.NOTION_ALLOCATIONS_DB_ID || '7ae1822f-dfd0-41e0-9098-c03b97f93bd5'
+const CLIENTS_DB_ID     = process.env.NOTION_CLIENTS_DB_ID     || '1c4a4860-b36e-4ca2-a243-57446accbe53'
 
 function headers() {
   return {
     Authorization: `Bearer ${process.env.NOTION_TOKEN}`,
-    "Notion-Version": NOTION_VERSION,
-    "Content-Type": "application/json",
+    'Notion-Version': NOTION_VERSION,
+    'Content-Type': 'application/json',
   }
 }
 
-async function queryAll(dbId: string): Promise<any[]> {
+async function queryAll(dbId: string, filter?: Record<string, unknown>): Promise<any[]> {
   const results: any[] = []
   let cursor: string | undefined
   let hasMore = true
@@ -25,14 +23,16 @@ async function queryAll(dbId: string): Promise<any[]> {
   while (hasMore) {
     const body: Record<string, unknown> = { page_size: 100 }
     if (cursor) body.start_cursor = cursor
+    if (filter) body.filter = filter
 
-    const res = await fetch(
-      `https://api.notion.com/v1/databases/${dbId}/query`,
-      { method: "POST", headers: headers(), body: JSON.stringify(body) }
-    )
+    const res = await fetch(`https://api.notion.com/v1/databases/${dbId}/query`, {
+      method: 'POST',
+      headers: headers(),
+      body: JSON.stringify(body),
+    })
 
     if (!res.ok) {
-      console.error(`Notion query failed for ${dbId}:`, await res.text())
+      console.error(`[norna] Notion query failed for ${dbId}:`, await res.text())
       break
     }
 
@@ -46,13 +46,17 @@ async function queryAll(dbId: string): Promise<any[]> {
 }
 
 function getText(prop: any): string {
-  if (prop?.type === "title") return prop.title?.map((t: any) => t.plain_text).join("") || ""
-  if (prop?.type === "rich_text") return prop.rich_text?.map((t: any) => t.plain_text).join("") || ""
-  return ""
+  if (prop?.type === 'title')      return prop.title?.map((t: any) => t.plain_text).join('') || ''
+  if (prop?.type === 'rich_text')  return prop.rich_text?.map((t: any) => t.plain_text).join('') || ''
+  return ''
 }
 
 function getSelect(prop: any): string {
-  return prop?.select?.name || ""
+  return prop?.select?.name || ''
+}
+
+function getMultiSelect(prop: any): string[] {
+  return prop?.multi_select?.map((s: any) => s.name) || []
 }
 
 function getNumber(prop: any): number {
@@ -60,197 +64,130 @@ function getNumber(prop: any): number {
 }
 
 function getDate(prop: any): string {
-  return prop?.date?.start || ""
+  return prop?.date?.start || ''
 }
 
 function getRelationIds(prop: any): string[] {
   return prop?.relation?.map((r: any) => r.id) || []
 }
 
-function getFormula(prop: any): any {
-  if (!prop?.formula) return null
-  const f = prop.formula
-  if (f.type === "number") return f.number
-  if (f.type === "string") return f.string
-  return null
-}
+const ACTIVE_PROJECT_STATUSES = new Set([
+  'Lead', 'Qualified', 'Scoping', 'Proposal Sent', 'Negotiation',
+  'Verbal Commitment', 'Won', 'Active', 'On Hold', 'Identified',
+])
 
 export async function GET() {
   try {
-    console.log(`[dashboard] Fetching: Projects=${PROJECTS_DB_ID}, Dépenses=${DEPENSES_DB_ID}, Employees=${EMPLOYEES_DB_ID}`)
-
-    const [projectsRaw, depensesRaw, employeesRaw, clientsRaw] = await Promise.all([
-      queryAll(PROJECTS_DB_ID),
-      queryAll(DEPENSES_DB_ID),
+    const [employeesRaw, projectsRaw, allocationsRaw, clientsRaw] = await Promise.all([
       queryAll(EMPLOYEES_DB_ID),
+      queryAll(PROJECTS_DB_ID),
+      queryAll(ALLOCATIONS_DB_ID),
       queryAll(CLIENTS_DB_ID),
     ])
 
-    console.log(`[dashboard] Fetched: ${projectsRaw.length} projects, ${depensesRaw.length} dépenses, ${employeesRaw.length} employees, ${clientsRaw.length} clients`)
-
-    // Build clients lookup + structured list
-    const clientsMap: Record<string, string> = {}
-    const clients: Array<{ id: string; name: string }> = []
-    for (const c of clientsRaw) {
-      const titleProp = Object.values(c.properties as Record<string, any>).find((p: any) => p.type === "title") as any
-      const name = titleProp?.title?.length > 0 ? titleProp.title.map((t: any) => t.plain_text).join("").trim() : ""
-      if (name) {
-        clientsMap[c.id] = name
-        clients.push({ id: c.id, name })
-      }
-    }
-    clients.sort((a, b) => a.name.localeCompare(b.name))
-
-    // Build employees lookup + structured list (CJE, dates)
+    // Full employees lookup (incluant les Departed pour résoudre les owners legacy)
     const employeesMap: Record<string, string> = {}
-    const employees: Array<{ id: string; name: string; cje: number; startDate: string; endDate: string; role: string; country: string; dateFirstSalary: string }> = []
-    for (const e of employeesRaw) {
-      const props = e.properties as Record<string, any>
-      const titleProp = Object.values(props).find((p: any) => p.type === "title") as any
-      const name = titleProp?.title?.length > 0 ? titleProp.title.map((t: any) => t.plain_text).join("").trim() : ""
-      if (name) employeesMap[e.id] = name
-      // Coût Journalier Entreprise (peut être formule ou number)
-      let cje = 0
-      const cjeProp = props["Coût Journalier Entreprise"] || props["Coût journalier entreprise"] || props["CJE"] || props["Cout Journalier Entreprise"]
-      if (cjeProp) {
-        if (cjeProp.type === "number") cje = cjeProp.number ?? 0
-        else if (cjeProp.type === "formula") cje = getFormula(cjeProp) ?? 0
-      }
-      const startDate = getDate(props["Date d'entrée"] || props["Start Date"] || props["Date début"] || {})
-      const endDate = getDate(props["Date de sortie"] || props["End Date"] || props["Date fin"] || {})
-      const role = getSelect(props["Role"] || props["Rôle"] || {}) || getText(props["Role"] || props["Rôle"] || {})
-      const country = getSelect(props["Country"] || props["Pays"] || {})
-      const dateFirstSalary = getDate(props["Date Premier Salaire"] || props["Date premier salaire"] || props["First Salary Date"] || {})
-      employees.push({ id: e.id, name, cje, startDate, endDate, role, country, dateFirstSalary })
+    const allEmployees = employeesRaw
+      .map((e: any) => {
+        const props = e.properties as Record<string, any>
+        const titleProp = Object.values(props).find((p: any) => p.type === 'title') as any
+        const name = titleProp?.title?.map((t: any) => t.plain_text).join('').trim() || ''
+        if (name) employeesMap[e.id] = name
+        return { raw: e, name, status: getSelect(props['Status']) }
+      })
+      .filter(x => x.name)
+
+    // Active employees only (returned to front)
+    const employees: WorkplaceEmployee[] = allEmployees
+      .filter(x => x.status === 'Active')
+      .map(({ raw: e, name }) => {
+        const props = e.properties as Record<string, any>
+        return {
+          id: e.id,
+          name,
+          email:              props['Email']?.email || '',
+          role:               getSelect(props['Role']),
+          department:         getSelect(props['Department']),
+          pays:               getSelect(props['Pays']),
+          specializations:    getMultiSelect(props['Specializations']),
+          availability:       getSelect(props['Availability']),
+          leaveQuotaAnnual:   getNumber(props['Congé annuel DAYS/Y']),
+          leaveMedQuota:      getNumber(props['Med & autres DAYS/Y']),
+          leaveConsoCurrentY: getNumber(props['CurrentY Conso Congé DAYS']),
+          leaveMedConsoCurrentY: getNumber(props['CurrentY Conso Med&Others DAYS']),
+        } satisfies WorkplaceEmployee
+      })
+
+    // Clients lookup
+    const clientsMap: Record<string, string> = {}
+    for (const c of clientsRaw) {
+      const titleProp = Object.values(c.properties as Record<string, any>).find((p: any) => p.type === 'title') as any
+      const name = titleProp?.title?.map((t: any) => t.plain_text).join('').trim() || ''
+      if (name) clientsMap[c.id] = name
     }
 
-    // Parse projects
-    const projects = projectsRaw.map((p: any) => {
-      const props = p.properties
-      // Commission : % (champ "% of commissions") et bénéficiaire (champ "Ad-hoc commissions 1 ? (eg training services)")
-      let commissionPercent = 0
-      const comPctProp = props["% of commissions"] || props["Commission %"] || props["Commission"]
-      if (comPctProp) {
-        if (comPctProp.type === "number") commissionPercent = comPctProp.number ?? 0
-        else if (comPctProp.type === "formula") commissionPercent = getFormula(comPctProp) ?? 0
-        else if (comPctProp.type === "percent" || comPctProp.type === "rollup") commissionPercent = comPctProp.percent ?? getFormula(comPctProp) ?? 0
-      }
-      // Owner / Phase / Team Members — champs utilisés pour la vérification de santé (Internal + tous types)
-      let ownerIds: string[] = []
-      let ownerName = ""
-      const ownerProp = props["Owner"] || props["Project Owner"] || props["Responsable"]
-      if (ownerProp) {
-        if (ownerProp.type === "relation") {
-          ownerIds = getRelationIds(ownerProp)
-          ownerName = ownerIds.map(id => employeesMap[id] || "").filter(Boolean).join(", ")
-        } else if (ownerProp.type === "people") {
-          const people = ownerProp.people || []
-          ownerIds = people.map((u: any) => u.id).filter(Boolean)
-          ownerName = people.map((u: any) => u.name).filter(Boolean).join(", ")
-        } else if (ownerProp.type === "select") {
-          ownerName = getSelect(ownerProp)
-        } else if (ownerProp.type === "rich_text" || ownerProp.type === "title") {
-          ownerName = getText(ownerProp)
-        }
-      }
-      const phase = getSelect(props["Phase"] || {}) || getText(props["Phase"] || {})
-      let teamMemberIds: string[] = []
-      let teamMemberNames = ""
-      const teamProp = props["Team Members"] || props["Team"] || props["\u00c9quipe"] || props["Team members"]
-      if (teamProp) {
-        if (teamProp.type === "relation") {
-          teamMemberIds = getRelationIds(teamProp)
-          teamMemberNames = teamMemberIds.map(id => employeesMap[id] || "").filter(Boolean).join(", ")
-        } else if (teamProp.type === "people") {
-          const people = teamProp.people || []
-          teamMemberIds = people.map((u: any) => u.id).filter(Boolean)
-          teamMemberNames = people.map((u: any) => u.name).filter(Boolean).join(", ")
-        } else if (teamProp.type === "multi_select") {
-          teamMemberNames = (teamProp.multi_select || []).map((s: any) => s.name).join(", ")
-        }
-      }
+    // projects lookup + list
+    const projectsMap: Record<string, { name: string; type: string }> = {}
+    const projects: WorkplaceProject[] = projectsRaw
+      .map((p: any) => {
+        const props  = p.properties as Record<string, any>
+        const name   = getText(props['Name'])
+        const status = getSelect(props['Status'])
+        const type   = getSelect(props['Type'])
+        if (name) projectsMap[p.id] = { name, type }
+        if (!ACTIVE_PROJECT_STATUSES.has(status)) return null
 
-      let commissionTo = ""
-      const comToProp = props["Ad-hoc commissions 1 ? (eg training services)"] || props["Ad-hoc commissions 1"] || props["Commissionnaire"] || props["Commission à"]
-      if (comToProp) {
-        if (comToProp.type === "relation") {
-          const ids = getRelationIds(comToProp)
-          commissionTo = ids.map(id => employeesMap[id] || clientsMap[id] || "Inconnu").filter(Boolean).join(", ")
-        } else if (comToProp.type === "select") commissionTo = getSelect(comToProp)
-        else if (comToProp.type === "multi_select") commissionTo = (comToProp.multi_select || []).map((s: any) => s.name).join(", ")
-        else if (comToProp.type === "people") commissionTo = (comToProp.people || []).map((u: any) => u.name).join(", ")
-        else if (comToProp.type === "rich_text" || comToProp.type === "title") commissionTo = getText(comToProp)
-        else if (comToProp.type === "status") commissionTo = comToProp.status?.name || ""
-      }
+        const ownerIds = getRelationIds(props['Owner'])
+        const ownerName = ownerIds.map(id => employeesMap[id] || '').filter(Boolean).join(', ')
+        const clientIds = getRelationIds(props['Client'])
+        const clientName = clientIds.map(id => clientsMap[id] || '').filter(Boolean).join(', ')
+
+        return {
+          id: p.id,
+          name,
+          type,
+          status,
+          phase:       getSelect(props['Phase']),
+          clientName,
+          startDate:   getDate(props['Start Date']),
+          endDate:     getDate(props['End Date']),
+          deadline:    getDate(props['Deadline']) || getDate(props['Expected Close Date']),
+          ownerName,
+          ownerIds,
+          health:      props['Health']?.formula?.string || '',
+        } satisfies WorkplaceProject
+      })
+      .filter(Boolean) as WorkplaceProject[]
+
+    // allocations
+    const allocations: Allocation[] = allocationsRaw.map((a: any) => {
+      const props = a.properties as Record<string, any>
+      const projectIds  = getRelationIds(props['Project'])
+      const firstProject = projectIds.length > 0 ? projectsMap[projectIds[0]] : null
       return {
-        id: p.id,
-        name: getText(props["Name"]),
-        status: getSelect(props["Status"]),
-        type: getSelect(props["Type"]),
-        methodology: getSelect(props["Methodology"]),
-        currency: getSelect(props["Currency"]),
-        quotedAmount: getNumber(props["Quoted Amount"]),
-        quotedAmountIsEmpty: props["Quoted Amount"]?.number === null || props["Quoted Amount"]?.number === undefined,
-        finalAmount: getNumber(props["Final Amount"]),
-        winPercent: getNumber(props["Win % (gut feeling)"]),
-        winAuto: (() => {
-          const v = getFormula(props["% win (auto)"])
-          return typeof v === "number" ? v : 0
-        })(),
-        riskLevel: getSelect(props["Risk Level"]),
-        clientSatisfaction: getSelect(props["Client Satisfaction"]),
-        startDate: getDate(props["Start Date"]),
-        endDate: getDate(props["End Date"]),
-        rentabilite: getFormula(props["Rentabilité (%)"]),
-        netAmount: getFormula(props["Net amount"]),
-        humanCost: getFormula(props["Human Internal Cost of project"]),
-        clientIds: getRelationIds(props["Client"]),
-        clientName: getRelationIds(props["Client"]).map(id => clientsMap[id] || "Inconnu").join(", ") || "N/A",
-        ownerIds,
-        ownerName,
-        phase,
-        teamMemberIds,
-        teamMemberNames,
-        commissionPercent,
-        commissionTo,
-        health: getFormula(props["Health"]) || "",
-      }
+        id:             a.id,
+        name:           getText(props['Name']),
+        personIds:      getRelationIds(props['Person']),
+        projectIds,
+        projectName:    firstProject?.name || '',
+        projectType:    firstProject?.type || '',
+        type:           (getSelect(props['Type']) || 'Project') as Allocation['type'],
+        startDate:      getDate(props['Start Date']),
+        startHalf:      (getSelect(props['Start Half']) || 'Morning') as Allocation['startHalf'],
+        endDate:        getDate(props['End Date']),
+        endHalf:        (getSelect(props['End Half']) || 'Afternoon') as Allocation['endHalf'],
+        effortPct:      getNumber(props['Effort %']) || 100,
+        status:         (getSelect(props['Status']) || 'Confirmed') as Allocation['status'],
+        leaveType:      getSelect(props['Leave Type']) as Allocation['leaveType'],
+        approvalStatus: getSelect(props['Approval Status']) as Allocation['approvalStatus'],
+        approverIds:    getRelationIds(props['Approver']),
+        notes:          getText(props['Notes']),
+      } satisfies Allocation
     })
 
-    // Parse dépenses
-    const depenses = depensesRaw.map((d: any) => {
-      const props = d.properties
-      const payeParIds = getRelationIds(props["Payé par"])
-      const payeParName = payeParIds.length > 0 ? (employeesMap[payeParIds[0]] || "Inconnu") : "Non attribué"
-
-      // Recurring Critical (checkbox) — dépenses à projeter dans le futur
-      const rcProp = props["Recurring Critical"] || props["Récurrent critique"] || props["Critical Recurring"]
-      const recurringCritical = rcProp?.type === "checkbox" ? !!rcProp.checkbox : !!(rcProp?.checkbox ?? false)
-      // Abonnement (Select) : nom canonique pour dédup recurring critical
-      const abonnement = getSelect(props["Abonnement"] || props["Subscription"] || {})
-      // Récurrence (Select) : "Mensuel" / "Annuel" — pilote le facteur mensuel
-      const recurrence = getSelect(props["Récurrence"] || props["Recurrence"] || props["Periodicité"] || {})
-      return {
-        id: d.id,
-        description: getText(props["Description"]),
-        date: getDate(props["Date"]),
-        fournisseur: getText(props["Fournisseur"]),
-        categorie: getSelect(props["Catégorie"]),
-        sousCategorie: getSelect(props["Sous-catégorie"]),
-        montant: getNumber(props["Montant"]),
-        montantMUR: getNumber(props["Montant MUR"]),
-        devise: getSelect(props["Devise"]),
-        dossier: getText(props["Dossier"]),
-        payePar: payeParName,
-        recurringCritical,
-        abonnement,
-        recurrence,
-      }
-    })
-
-    return NextResponse.json({ projects, depenses, employees, clients })
+    return NextResponse.json({ employees, projects, allocations })
   } catch (error: any) {
-    console.error("Dashboard fetch error:", error)
+    console.error('[norna] dashboard error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

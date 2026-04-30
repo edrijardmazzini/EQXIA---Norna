@@ -15,12 +15,12 @@ interface CommandItem {
 }
 
 const PAGE_ITEMS: CommandItem[] = [
-  { id: 'p:planning',  label: 'Planification',   hint: 'Grille équipe',          href: '/workplace',          icon: CalendarDays, category: 'page' },
-  { id: 'p:capacity',  label: 'Capacité',        hint: 'Heatmap + signaux',      href: '/workplace/capacity', icon: BarChart3,    category: 'page' },
-  { id: 'p:projects',  label: 'Projets',         hint: 'Liste forecast',         href: '/workplace/projects', icon: Briefcase,    category: 'page' },
-  { id: 'p:leaves',    label: 'Congés',          hint: 'Workflow + soldes',      href: '/workplace/leaves',   icon: Umbrella,     category: 'page' },
-  { id: 'p:me',        label: 'Mon dashboard',   hint: 'Vue perso',              href: '/workplace/me',       icon: User,         category: 'page' },
-  { id: 'p:ai',        label: 'Assistant IA',    hint: 'Staffing + Q&A',         href: '/workplace/ai',       icon: BrainCircuit, category: 'page' },
+  { id: 'p:planning',  label: 'Planification',   hint: 'Grille équipe',          href: '/',          icon: CalendarDays, category: 'page' },
+  { id: 'p:capacity',  label: 'Capacité',        hint: 'Heatmap + signaux',      href: '/capacity', icon: BarChart3,    category: 'page' },
+  { id: 'p:projects',  label: 'Projets',         hint: 'Liste forecast',         href: '/projects', icon: Briefcase,    category: 'page' },
+  { id: 'p:leaves',    label: 'Congés',          hint: 'Workflow + soldes',      href: '/leaves',   icon: Umbrella,     category: 'page' },
+  { id: 'p:me',        label: 'Mon dashboard',   hint: 'Vue perso',              href: '/me',       icon: User,         category: 'page' },
+  { id: 'p:ai',        label: 'Assistant IA',    hint: 'Staffing + Q&A',         href: '/ai',       icon: BrainCircuit, category: 'page' },
 ]
 
 function fuzzyMatch(query: string, text: string): boolean {
@@ -85,7 +85,7 @@ export function CommandPalette() {
       id: `pe:${e.id}`,
       label: e.name,
       hint: `${e.role}${e.pays ? ' · ' + e.pays : ''}`,
-      href: `/workplace/people/${e.id}`,
+      href: `/people/${e.id}`,
       icon: Users,
       category: 'person',
     }))
@@ -93,7 +93,7 @@ export function CommandPalette() {
       id: `pr:${p.id}`,
       label: p.name,
       hint: `${p.clientName || '—'} · ${p.type}`,
-      href: `/workplace/projects/${p.id}`,
+      href: `/projects/${p.id}`,
       icon: FolderKanban,
       category: 'project',
     }))
