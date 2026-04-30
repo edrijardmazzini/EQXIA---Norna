@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { ChevronRight, Search } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
+import { RefreshButton } from '@/components/workplace/RefreshButton'
 import { EqxiaLoadingScreen } from '@/components/eqxia'
 import type { WorkplaceProject } from '@/types/workplace'
 
@@ -90,7 +91,7 @@ function ProjectRow({ project, allocCount, peopleCount }: { project: WorkplacePr
 }
 
 export default function ProjectsListPage() {
-  const { projects, allocations, loading, error } = useWorkplaceData()
+  const { projects, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
   const [search, setSearch] = useState('')
   const [tab, setTab] = useState<'pipeline' | 'delivery' | 'all'>('delivery')
 
@@ -135,7 +136,10 @@ export default function ProjectsListPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
       <div>
-        <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700 }}>Projets</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700 }}>Projets</div>
+          <RefreshButton onRefresh={reload} refreshing={refreshing} lastFetchAt={lastFetchAt} />
+        </div>
         <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
           Pilotage staffing par projet · cliquez pour ouvrir le forecast
         </div>

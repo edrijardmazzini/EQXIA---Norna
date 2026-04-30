@@ -7,6 +7,7 @@ import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { generateGrid, coversCell, leaveDurationDays, weekLabel, getMondayOf, toYMD } from '@/lib/workplace/grid'
 import { HOLIDAY_DATES_MU, HOLIDAYS_MU_2026 } from '@/lib/workplace/holidays'
 import { EqxiaLoadingScreen } from '@/components/eqxia'
+import { RefreshButton } from '@/components/workplace/RefreshButton'
 import type { Allocation } from '@/types/workplace'
 
 const CARD_STYLE: React.CSSProperties = {
@@ -37,7 +38,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function MePage() {
   const { data: session } = useSession()
-  const { employees, allocations, loading, error } = useWorkplaceData()
+  const { employees, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
 
   const me = useMemo(
     () => employees.find(e => e.email && session?.user?.email && e.email.toLowerCase() === session.user.email.toLowerCase()),
@@ -117,8 +118,11 @@ export default function MePage() {
 
       {/* Greeting */}
       <div>
-        <div style={{ fontSize: 'var(--fs-2xl)', fontWeight: 700, color: 'var(--text-primary)' }}>
-          Bonjour, {firstName}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ fontSize: 'var(--fs-2xl)', fontWeight: 700, color: 'var(--text-primary)' }}>
+            Bonjour, {firstName}
+          </div>
+          <RefreshButton onRefresh={reload} refreshing={refreshing} lastFetchAt={lastFetchAt} />
         </div>
         <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 4, textTransform: 'capitalize' }}>
           {today.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} · {me.role} · {me.pays}

@@ -9,6 +9,7 @@ import { generateGrid, coversCell, weekLabel, weekNumber, getMondayOf, type Grid
 import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
 import { skillMatch, expectedSkillsFor } from '@/lib/workplace/skills'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
+import { RefreshButton } from '@/components/workplace/RefreshButton'
 import { EqxiaLoadingScreen } from '@/components/eqxia'
 import type { Allocation, WorkplaceEmployee } from '@/types/workplace'
 
@@ -110,7 +111,7 @@ function scoreCandidates(
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params)
   const toast = useToast()
-  const { employees, projects, allocations, loading, error, reload } = useWorkplaceData()
+  const { employees, projects, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
   const [modalState, setModalState] = useState<
     | { mode: 'closed' }
     | { mode: 'create'; personId?: string }
@@ -227,13 +228,16 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
       {/* Back link */}
-      <Link href="/workplace/projects" style={{
-        display: 'inline-flex', alignItems: 'center', gap: 5,
-        fontSize: 'var(--fs-xs)', color: 'var(--text-muted)',
-        textDecoration: 'none', alignSelf: 'flex-start',
-      }}>
-        <ArrowLeft size={12} /> Retour aux projets
-      </Link>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <Link href="/workplace/projects" style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          fontSize: 'var(--fs-xs)', color: 'var(--text-muted)',
+          textDecoration: 'none',
+        }}>
+          <ArrowLeft size={12} /> Retour aux projets
+        </Link>
+        <RefreshButton onRefresh={reload} refreshing={refreshing} lastFetchAt={lastFetchAt} />
+      </div>
 
       {/* Header */}
       <div style={{ ...CARD_STYLE, padding: 18 }}>

@@ -9,6 +9,7 @@ import { generateGrid, coversCell, weekLabel, getMondayOf, toYMD, DAY_LABELS, ty
 import type { Allocation, AllocationStatus } from '@/types/workplace'
 import { EqxiaLoadingScreen } from '@/components/eqxia'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
+import { RefreshButton } from '@/components/workplace/RefreshButton'
 
 // ── Colour palette per project type ──────────────────────────────────────────
 const TYPE_COLORS: Record<string, string> = {
@@ -86,7 +87,7 @@ function FilterChip({ label, active, color, onClick }: { label: string; active: 
 }
 
 export default function PlanningPage() {
-  const { employees, projects, allocations, loading, error, reload } = useWorkplaceData()
+  const { employees, projects, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
 
   // Navigation state
   const [weeksCount, setWeeksCount] = useState<4 | 8 | 12>(8)
@@ -200,7 +201,10 @@ export default function PlanningPage() {
       {/* Top bar */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>Planification équipe</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>Planification équipe</div>
+            <RefreshButton onRefresh={reload} refreshing={refreshing} lastFetchAt={lastFetchAt} />
+          </div>
           <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
             {employees.length} personnes · {weeksCount} semaines à partir du {weekLabel(weekStarts[0]).split(' – ')[0]}
           </div>

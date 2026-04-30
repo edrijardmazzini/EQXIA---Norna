@@ -8,6 +8,7 @@ import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { leaveDurationDays } from '@/lib/workplace/grid'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
 import { useToast } from '@/components/workplace/ToastProvider'
+import { RefreshButton } from '@/components/workplace/RefreshButton'
 import { EqxiaLoadingScreen } from '@/components/eqxia'
 import type { Allocation, WorkplaceEmployee } from '@/types/workplace'
 
@@ -81,7 +82,7 @@ const CARD_STYLE: React.CSSProperties = {
 export default function LeavesPage() {
   const { data: session } = useSession()
   const toast = useToast()
-  const { employees, projects, allocations, loading, error, reload } = useWorkplaceData()
+  const { employees, projects, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
   const [modalOpen, setModalOpen] = useState(false)
   const [editingAlloc, setEditingAlloc] = useState<Allocation | undefined>(undefined)
   const [actioning, setActioning] = useState<string>('')
@@ -155,7 +156,10 @@ export default function LeavesPage() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700 }}>Congés</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700 }}>Congés</div>
+            <RefreshButton onRefresh={reload} refreshing={refreshing} lastFetchAt={lastFetchAt} />
+          </div>
           <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
             {pending.length} en attente · {employees.length} personnes
             {!isCofounder && <span style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 4 }}><Lock size={11} /> approbation réservée aux Co-founders</span>}

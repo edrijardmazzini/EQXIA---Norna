@@ -6,6 +6,7 @@ import { useSession } from 'next-auth/react'
 import { AlertOctagon, AlertTriangle, TrendingDown, Umbrella, Briefcase, Calendar, Check, X, Lock, CheckCircle2, ZapOff } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { useToast } from '@/components/workplace/ToastProvider'
+import { RefreshButton } from '@/components/workplace/RefreshButton'
 import {
   buildLoadMatrix,
   detectCapacitySignals,
@@ -107,7 +108,7 @@ const LEVEL_COLOR: Record<SignalLevel, string> = {
 export default function SignalsPage() {
   const { data: session } = useSession()
   const toast = useToast()
-  const { employees, projects, allocations, loading, error, reload } = useWorkplaceData()
+  const { employees, projects, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
   const [actioning, setActioning] = useState<string>('')
 
   const currentEmployee = useMemo(
@@ -193,7 +194,10 @@ export default function SignalsPage() {
 
       {/* Header */}
       <div>
-        <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700 }}>Signaux</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700 }}>Signaux</div>
+          <RefreshButton onRefresh={reload} refreshing={refreshing} lastFetchAt={lastFetchAt} />
+        </div>
         <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
           Tableau de bord matinal — tout ce qui demande votre attention sur les {HORIZON_WEEKS} prochaines semaines
         </div>

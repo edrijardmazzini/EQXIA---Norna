@@ -8,6 +8,7 @@ import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
 import { generateGrid, coversCell, weekLabel, weekNumber, type GridCell } from '@/lib/workplace/grid'
 import type { Allocation } from '@/types/workplace'
 import { EqxiaLoadingScreen } from '@/components/eqxia'
+import { RefreshButton } from '@/components/workplace/RefreshButton'
 
 const WEEKS = 12
 
@@ -106,7 +107,7 @@ function computeSignals(loadMatrix: Map<string, CellLoad[]>, employees: { id: st
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function CapacityPage() {
-  const { employees, allocations, loading, error, reload } = useWorkplaceData()
+  const { employees, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
 
   const { cells, weekStarts } = useMemo(() => generateGrid(WEEKS), [])
 
@@ -148,8 +149,11 @@ export default function CapacityPage() {
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 14 }}>
 
         <div>
-          <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>
-            Capacité équipe
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ fontSize: 'var(--fs-lg)', fontWeight: 700, color: 'var(--text-primary)' }}>
+              Capacité équipe
+            </div>
+            <RefreshButton onRefresh={reload} refreshing={refreshing} lastFetchAt={lastFetchAt} />
           </div>
           <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)', marginTop: 2 }}>
             {employees.length} personnes · {WEEKS} semaines · charge basée sur Confirmed

@@ -7,6 +7,7 @@ import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { generateGrid, coversCell, leaveDurationDays, weekLabel, weekNumber, getMondayOf, toYMD, type GridCell } from '@/lib/workplace/grid'
 import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
+import { RefreshButton } from '@/components/workplace/RefreshButton'
 import { EqxiaLoadingScreen } from '@/components/eqxia'
 import type { Allocation, WorkplaceEmployee } from '@/types/workplace'
 
@@ -76,7 +77,7 @@ function computeWeekLoad(personId: string, weekCells: GridCell[], allocations: A
 
 export default function PersonDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: personId } = use(params)
-  const { employees, projects, allocations, loading, error, reload } = useWorkplaceData()
+  const { employees, projects, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
   const [modalState, setModalState] = useState<
     | { mode: 'closed' }
     | { mode: 'create' }
@@ -156,13 +157,16 @@ export default function PersonDetailPage({ params }: { params: Promise<{ id: str
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-      <Link href="/workplace" style={{
-        display: 'inline-flex', alignItems: 'center', gap: 5,
-        fontSize: 'var(--fs-xs)', color: 'var(--text-muted)',
-        textDecoration: 'none', alignSelf: 'flex-start',
-      }}>
-        <ArrowLeft size={12} /> Retour au planning
-      </Link>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <Link href="/workplace" style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          fontSize: 'var(--fs-xs)', color: 'var(--text-muted)',
+          textDecoration: 'none',
+        }}>
+          <ArrowLeft size={12} /> Retour au planning
+        </Link>
+        <RefreshButton onRefresh={reload} refreshing={refreshing} lastFetchAt={lastFetchAt} />
+      </div>
 
       {/* Profile header */}
       <div style={{ ...CARD_STYLE, padding: 18 }}>
