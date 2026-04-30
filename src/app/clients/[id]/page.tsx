@@ -45,7 +45,7 @@ export default function ClientPage() {
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg-page)', color: 'var(--text-primary)' }}>
       <AppHeader
-        appName="Concordia — Client"
+        appName="Norna — Client"
         right={
           <button onClick={() => router.push('/?tab=clients')} style={{ fontSize: 'var(--fs-sm)', color: 'var(--text-secondary)', padding: '4px 10px', borderRadius: 'var(--radius-btn)', border: '1px solid var(--border-subtle)', background: 'var(--bg-card)', cursor: 'pointer' }}>
             ← Clients

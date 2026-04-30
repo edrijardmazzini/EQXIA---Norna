@@ -83,7 +83,7 @@ function KpiStat({ value, label, color, icon: Icon }: { value: number; label: st
   )
 }
 
-export default function ConcordiaPage() {
+export default function NornaPage() {
   const { data: session } = useSession()
   const router = useRouter()
   const { mode, setTheme } = useTheme()
@@ -178,7 +178,7 @@ export default function ConcordiaPage() {
 
   const ActiveThemeIcon = THEME_ICONS[mode]
 
-  if (loading) return <EqxiaLoadingScreen appName="Concordia" bgImage={bgImage} />
+  if (loading) return <EqxiaLoadingScreen appName="Norna" bgImage={bgImage} />
 
   if (error) {
     return (
@@ -197,7 +197,7 @@ export default function ConcordiaPage() {
       <div style={{ position: 'fixed', inset: 0, background: 'var(--bg-overlay)', zIndex: 0 }} />
       <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh', color: 'var(--text-primary)' }}>
         <AppHeader
-          appName="Concordia"
+          appName="Norna"
           right={
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
               <div style={{ textAlign: 'right', lineHeight: 1.1 }}>
