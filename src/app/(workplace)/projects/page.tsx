@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { ChevronRight, Search } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { RefreshButton } from '@/components/workplace/RefreshButton'
-import { NornaLoadingScreen } from '@/components/workplace/NornaLoadingScreen'
 import type { WorkplaceProject } from '@/types/workplace'
 
 const STATUS_BADGE: Record<string, { color: string; bg: string }> = {
@@ -123,7 +122,6 @@ export default function ProjectsListPage() {
       .sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''))
   }, [projects, search, tab])
 
-  if (loading) return <NornaLoadingScreen />
   if (error) return <div style={{ padding: 40, color: 'var(--color-error)' }}>Erreur : {error}</div>
 
   const counts = {

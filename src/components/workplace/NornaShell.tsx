@@ -5,6 +5,8 @@ import { Monitor, Moon, Sun, Search } from 'lucide-react'
 import { AppHeader } from '@/components/layout/AppHeader'
 import { NornaTabs } from './NornaTabs'
 import { WorkplaceProviders } from './WorkplaceProviders'
+import { WorkplaceDataProvider } from './WorkplaceDataProvider'
+import { CommandPalette } from './CommandPalette'
 import { useTheme } from '@/hooks/useTheme'
 
 const BG_IMAGES = [
@@ -38,6 +40,8 @@ export function NornaShell({ children }: { children: ReactNode }) {
   return (
     <BgImageContext.Provider value={bgImage}>
       <WorkplaceProviders>
+        <WorkplaceDataProvider>
+          <CommandPalette />
         <div style={{
           minHeight: '100vh',
           backgroundImage: `url(${bgImage})`,
@@ -192,6 +196,7 @@ export function NornaShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </div>
+        </WorkplaceDataProvider>
       </WorkplaceProviders>
     </BgImageContext.Provider>
   )

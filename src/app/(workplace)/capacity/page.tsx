@@ -7,7 +7,6 @@ import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
 import { generateGrid, coversCell, weekLabel, weekNumber, type GridCell } from '@/lib/workplace/grid'
 import type { Allocation } from '@/types/workplace'
-import { NornaLoadingScreen } from '@/components/workplace/NornaLoadingScreen'
 import { RefreshButton } from '@/components/workplace/RefreshButton'
 
 const WEEKS = 12
@@ -132,7 +131,6 @@ export default function CapacityPage() {
 
   const signals = useMemo(() => computeSignals(loadMatrix, employees), [loadMatrix, employees])
 
-  if (loading) return <NornaLoadingScreen />
   if (error) return (
     <div style={{ padding: 40, color: 'var(--color-error)', fontSize: 'var(--fs-sm)' }}>
       Erreur : {error}{' '}

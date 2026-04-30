@@ -10,7 +10,6 @@ import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
 import { skillMatch, expectedSkillsFor } from '@/lib/workplace/skills'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
 import { RefreshButton } from '@/components/workplace/RefreshButton'
-import { NornaLoadingScreen } from '@/components/workplace/NornaLoadingScreen'
 import type { Allocation, WorkplaceEmployee } from '@/types/workplace'
 
 interface AICandidate {
@@ -212,7 +211,6 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     return scoreCandidates(pool, project.type, cells, projectAllocations, allocations).slice(0, 8)
   }, [project, employees, allocatedPeopleIds, cells, projectAllocations, allocations])
 
-  if (loading) return <NornaLoadingScreen />
   if (error)   return <div style={{ padding: 40, color: 'var(--color-error)' }}>Erreur : {error}</div>
   if (!project) return (
     <div style={CARD_STYLE}>
