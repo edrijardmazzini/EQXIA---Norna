@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { X, Trash2 } from 'lucide-react'
+import { useToast } from './ToastProvider'
 import type {
   Allocation,
   WorkplaceEmployee,
@@ -85,6 +86,7 @@ function todayYMD(): string {
 
 export function AllocationModal({ employees, projects, allocations, existing, defaultPersonId, defaultProjectId, defaultDate, onClose, onSaved }: Props) {
   const isEdit = !!existing
+  const toast = useToast()
 
   const [type, setType] = useState<AllocationType>(existing?.type || 'Project')
   const [personId, setPersonId] = useState(existing?.personIds[0] || defaultPersonId || employees[0]?.id || '')
@@ -165,9 +167,12 @@ export function AllocationModal({ employees, projects, allocations, existing, de
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error || `HTTP ${res.status}`)
       }
+      toast.success(isEdit ? 'Allocation mise à jour' : 'Allocation créée')
       onSaved()
     } catch (e) {
-      setError((e as Error).message)
+      const msg = (e as Error).message
+      setError(msg)
+      toast.error(msg)
     } finally {
       setSubmitting(false)
     }
@@ -184,9 +189,12 @@ export function AllocationModal({ employees, projects, allocations, existing, de
         const data = await res.json().catch(() => ({}))
         throw new Error(data.error || `HTTP ${res.status}`)
       }
+      toast.success('Allocation supprimée')
       onSaved()
     } catch (e) {
-      setError((e as Error).message)
+      const msg = (e as Error).message
+      setError(msg)
+      toast.error(msg)
     } finally {
       setDeleting(false)
     }

@@ -7,6 +7,7 @@ import { Plus, Check, X, Lock } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { leaveDurationDays } from '@/lib/workplace/grid'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
+import { useToast } from '@/components/workplace/ToastProvider'
 import { EqxiaLoadingScreen } from '@/components/eqxia'
 import type { Allocation, WorkplaceEmployee } from '@/types/workplace'
 
@@ -79,6 +80,7 @@ const CARD_STYLE: React.CSSProperties = {
 
 export default function LeavesPage() {
   const { data: session } = useSession()
+  const toast = useToast()
   const { employees, projects, allocations, loading, error, reload } = useWorkplaceData()
   const [modalOpen, setModalOpen] = useState(false)
   const [editingAlloc, setEditingAlloc] = useState<Allocation | undefined>(undefined)
@@ -130,8 +132,9 @@ export default function LeavesPage() {
       })
       if (!res.ok) {
         const data = await res.json().catch(() => ({}))
-        alert(`Erreur : ${data.error || res.status}`)
+        toast.error(`Erreur : ${data.error || res.status}`)
       } else {
+        toast.success(decision === 'Approved' ? 'Demande approuvée' : 'Demande rejetée')
         reload()
       }
     } finally {

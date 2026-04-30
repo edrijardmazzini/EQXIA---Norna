@@ -31,6 +31,25 @@ export function WorkplaceSidebar() {
       height: 'calc(100vh - var(--header-height))',
       overflowY: 'auto',
     }}>
+      <div style={{
+        padding: '6px 10px 10px',
+        fontSize: 10,
+        color: 'var(--text-muted)',
+        fontFamily: 'monospace',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <span style={{ textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>Norna</span>
+        <span style={{
+          padding: '1px 5px',
+          background: 'var(--bg-input)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: 3,
+        }}>
+          ⌘K
+        </span>
+      </div>
       {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
         const isActive = href === '/workplace'
           ? pathname === '/workplace'
