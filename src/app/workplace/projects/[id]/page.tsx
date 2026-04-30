@@ -439,6 +439,7 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
         <AllocationModal
           employees={employees}
           projects={projects}
+          allocations={allocations}
           existing={modalState.mode === 'edit' ? modalState.allocation : undefined}
           defaultPersonId={modalState.mode === 'create' ? modalState.personId : undefined}
           defaultProjectId={projectId}

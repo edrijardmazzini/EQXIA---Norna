@@ -355,6 +355,7 @@ export default function LeavesPage() {
         <AllocationModal
           employees={employees}
           projects={projects}
+          allocations={allocations}
           existing={editingAlloc}
           onClose={() => { setModalOpen(false); setEditingAlloc(undefined) }}
           onSaved={() => { setModalOpen(false); setEditingAlloc(undefined); reload() }}

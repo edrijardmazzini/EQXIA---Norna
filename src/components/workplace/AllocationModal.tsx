@@ -15,12 +15,47 @@ import type {
 interface Props {
   employees: WorkplaceEmployee[]
   projects: WorkplaceProject[]
+  allocations?: Allocation[]
   existing?: Allocation
   defaultPersonId?: string
   defaultProjectId?: string
   defaultDate?: string
   onClose: () => void
   onSaved: () => void
+}
+
+// Détecte les conflits potentiels (autre allocation Confirmed sur la même personne
+// chevauchant la période, hors l'allocation en cours d'édition)
+function detectConflicts(
+  allocations: Allocation[] | undefined,
+  excludeId: string | undefined,
+  personId: string,
+  startDate: string,
+  startHalf: HalfDay,
+  endDate: string,
+  endHalf: HalfDay,
+): Allocation[] {
+  if (!allocations || !personId || !startDate || !endDate) return []
+  return allocations.filter(a => {
+    if (a.id === excludeId) return false
+    if (!a.personIds.includes(personId)) return false
+
+    // Bloquant : Project Confirmed OU Leave Approved
+    const blocking =
+      (a.type === 'Project' && a.status === 'Confirmed') ||
+      (a.type === 'Leave'   && a.approvalStatus === 'Approved')
+    if (!blocking) return false
+
+    // Overlap : a.start ≤ end ET a.end ≥ start (avec demi-journées)
+    const startIdx = startHalf === 'Morning' ? 0 : 1
+    const endIdx   = endHalf   === 'Morning' ? 0 : 1
+    const aStartIdx = a.startHalf === 'Morning' ? 0 : 1
+    const aEndIdx   = a.endHalf   === 'Morning' ? 0 : 1
+
+    const aStartsAfter = a.startDate > endDate || (a.startDate === endDate && aStartIdx > endIdx)
+    const aEndsBefore  = a.endDate   < startDate || (a.endDate   === startDate && aEndIdx   < startIdx)
+    return !aStartsAfter && !aEndsBefore
+  })
 }
 
 const INPUT_STYLE: React.CSSProperties = {
@@ -48,7 +83,7 @@ function todayYMD(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-export function AllocationModal({ employees, projects, existing, defaultPersonId, defaultProjectId, defaultDate, onClose, onSaved }: Props) {
+export function AllocationModal({ employees, projects, allocations, existing, defaultPersonId, defaultProjectId, defaultDate, onClose, onSaved }: Props) {
   const isEdit = !!existing
 
   const [type, setType] = useState<AllocationType>(existing?.type || 'Project')
@@ -75,6 +110,14 @@ export function AllocationModal({ employees, projects, existing, defaultPersonId
     const projectName = project?.name || '?'
     return `${personName} → ${projectName} (${startDate} → ${endDate})`
   }, [type, person, project, startDate, endDate, leaveType])
+
+  // Conflit : autre allocation bloquante sur la même personne sur la même période
+  const conflicts = useMemo(() => {
+    // Le conflit ne se calcule que si on crée du Project Confirmed ou un Leave
+    const willBlock = (type === 'Project' && status === 'Confirmed') || type === 'Leave'
+    if (!willBlock) return []
+    return detectConflicts(allocations, existing?.id, personId, startDate, startHalf, endDate, endHalf)
+  }, [allocations, existing, personId, startDate, startHalf, endDate, endHalf, type, status])
 
   async function handleSubmit() {
     setError('')
@@ -292,6 +335,35 @@ export function AllocationModal({ employees, projects, existing, defaultPersonId
               style={{ ...INPUT_STYLE, resize: 'vertical' }}
             />
           </div>
+
+          {conflicts.length > 0 && (
+            <div style={{
+              fontSize: 'var(--fs-xs)',
+              color: 'var(--color-warning)',
+              padding: '8px 10px',
+              background: 'rgba(250, 204, 21, 0.08)',
+              border: '1px solid rgba(250, 204, 21, 0.30)',
+              borderRadius: 'var(--radius-input)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}>
+              <div style={{ fontWeight: 700 }}>
+                ⚠ {conflicts.length} conflit{conflicts.length > 1 ? 's' : ''} sur cette personne
+              </div>
+              <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)' }}>
+                {conflicts.slice(0, 3).map(c => (
+                  <div key={c.id}>
+                    • {c.type === 'Leave' ? `Congé ${c.leaveType}` : c.projectName} ({c.startDate} → {c.endDate})
+                  </div>
+                ))}
+                {conflicts.length > 3 && <div>• … et {conflicts.length - 3} autre{conflicts.length - 3 > 1 ? 's' : ''}</div>}
+              </div>
+              <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', fontStyle: 'italic', marginTop: 2 }}>
+                Vous pouvez créer quand même — le conflit sera juste signalé sur la heatmap.
+              </div>
+            </div>
+          )}
 
           {error && (
             <div style={{ fontSize: 'var(--fs-xs)', color: 'var(--color-error)', padding: '6px 10px', background: 'rgba(248, 113, 113, 0.08)', borderRadius: 'var(--radius-input)' }}>
