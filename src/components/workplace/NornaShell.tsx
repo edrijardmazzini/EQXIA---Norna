@@ -1,9 +1,9 @@
 'use client'
 
 import { type ReactNode, useEffect, useState, createContext, useContext } from 'react'
-import { Monitor, Moon, Sun } from 'lucide-react'
+import { Monitor, Moon, Sun, Search } from 'lucide-react'
 import { AppHeader } from '@/components/layout/AppHeader'
-import { WorkplaceSidebar } from './WorkplaceSidebar'
+import { NornaTabs } from './NornaTabs'
 import { WorkplaceProviders } from './WorkplaceProviders'
 import { useTheme } from '@/hooks/useTheme'
 
@@ -18,13 +18,12 @@ const BG_IMAGES = [
 
 const THEME_ICONS = { auto: Monitor, dark: Moon, light: Sun } as const
 
-// Bg image context — shared with NornaLoadingScreen so loading view has the same bg
+// Bg image partagé avec NornaLoadingScreen pour cohérence visuelle
 const BgImageContext = createContext<string>('')
 export function useBgImage(): string { return useContext(BgImageContext) }
 
 export function NornaShell({ children }: { children: ReactNode }) {
   const { mode, setTheme } = useTheme()
-  // Initial bg pick is deterministic to avoid hydration mismatch ; randomized client-side after mount
   const [bgImage, setBgImage] = useState(BG_IMAGES[0])
   const [themeOpen, setThemeOpen] = useState(false)
   const [now, setNow] = useState<Date | null>(null)
@@ -47,7 +46,7 @@ export function NornaShell({ children }: { children: ReactNode }) {
           backgroundAttachment: 'fixed',
           position: 'relative',
         }}>
-          {/* Soft overlay for legibility */}
+          {/* Soft overlay pour la lisibilité */}
           <div style={{ position: 'fixed', inset: 0, background: 'var(--bg-overlay)', zIndex: 0, pointerEvents: 'none' }} />
 
           <div style={{
@@ -62,42 +61,60 @@ export function NornaShell({ children }: { children: ReactNode }) {
               appName="Norna"
               right={
                 now && (
-                  <div style={{ textAlign: 'right', lineHeight: 1.1 }}>
-                    <div style={{
-                      fontSize: 'var(--fs-2xs)',
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                    <div style={{ textAlign: 'right', lineHeight: 1.1 }}>
+                      <div style={{
+                        fontSize: 'var(--fs-2xs)',
+                        color: 'var(--text-muted)',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.08em',
+                        fontWeight: 600,
+                      }}>
+                        {now.toLocaleDateString('fr-FR', { weekday: 'long' })}
+                      </div>
+                      <div style={{
+                        fontSize: 'var(--fs-sm)',
+                        color: 'var(--text-primary)',
+                        fontWeight: 600,
+                        fontFamily: 'monospace',
+                      }}>
+                        {now.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
+                      </div>
+                    </div>
+                    <span style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      padding: '4px 9px',
+                      borderRadius: 'var(--radius-btn)',
+                      border: '1px solid var(--border-subtle)',
+                      background: 'var(--bg-card)',
                       color: 'var(--text-muted)',
-                      textTransform: 'uppercase',
-                      letterSpacing: '0.08em',
-                      fontWeight: 600,
-                    }}>
-                      {now.toLocaleDateString('fr-FR', { weekday: 'long' })}
-                    </div>
-                    <div style={{
-                      fontSize: 'var(--fs-sm)',
-                      color: 'var(--text-primary)',
-                      fontWeight: 600,
+                      fontSize: 10,
                       fontFamily: 'monospace',
+                      whiteSpace: 'nowrap',
                     }}>
-                      {now.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}
-                    </div>
+                      <Search size={10} /> ⌘K
+                    </span>
                   </div>
                 )
               }
             />
 
-            <div style={{ display: 'flex', flex: 1 }}>
-              <WorkplaceSidebar />
-              <main style={{
-                flex: 1,
-                overflow: 'auto',
-                padding: 'var(--content-py) var(--content-px)',
-              }}>
-                {children}
-              </main>
-            </div>
+            <NornaTabs />
+
+            <main style={{
+              flex: 1,
+              maxWidth: 'var(--content-max)',
+              margin: '0 auto',
+              padding: 'var(--content-py) var(--content-px)',
+              width: '100%',
+            }}>
+              {children}
+            </main>
           </div>
 
-          {/* Floating theme toggle — bottom-left, glassmorphic */}
+          {/* Theme toggle flottant — bottom-left */}
           <div style={{ position: 'fixed', bottom: 20, left: 20, zIndex: 100 }}>
             <div style={{ position: 'relative' }}>
               {themeOpen && (
