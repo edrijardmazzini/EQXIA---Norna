@@ -9,7 +9,7 @@ import { leaveDurationDays } from '@/lib/workplace/grid'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
 import { useToast } from '@/components/workplace/ToastProvider'
 import { RefreshButton } from '@/components/workplace/RefreshButton'
-import { EqxiaLoadingScreen } from '@/components/eqxia'
+import { NornaLoadingScreen } from '@/components/workplace/NornaLoadingScreen'
 import type { Allocation, WorkplaceEmployee } from '@/types/workplace'
 
 const LEAVE_TYPE_LABELS: Record<string, string> = {
@@ -143,7 +143,7 @@ export default function LeavesPage() {
     }
   }
 
-  if (loading) return <EqxiaLoadingScreen appName="Norna" />
+  if (loading) return <NornaLoadingScreen />
   if (error) return (
     <div style={{ padding: 40, color: 'var(--color-error)', fontSize: 'var(--fs-sm)' }}>
       Erreur : {error}

@@ -16,7 +16,7 @@ import {
   type SignalLevel,
 } from '@/lib/workplace/load'
 import { leaveDurationDays } from '@/lib/workplace/grid'
-import { EqxiaLoadingScreen } from '@/components/eqxia'
+import { NornaLoadingScreen } from '@/components/workplace/NornaLoadingScreen'
 import type { Allocation, WorkplaceEmployee } from '@/types/workplace'
 
 const HORIZON_WEEKS = 4
@@ -180,7 +180,7 @@ export default function SignalsPage() {
     }
   }
 
-  if (loading) return <EqxiaLoadingScreen appName="Norna" />
+  if (loading) return <NornaLoadingScreen />
   if (error)   return <div style={{ padding: 40, color: 'var(--color-error)' }}>Erreur : {error}</div>
 
   const totalActionable =

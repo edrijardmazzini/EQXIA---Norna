@@ -7,7 +7,7 @@ import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
 import { generateGrid, coversCell, weekLabel, getMondayOf, toYMD, DAY_LABELS, type GridCell } from '@/lib/workplace/grid'
 import type { Allocation, AllocationStatus } from '@/types/workplace'
-import { EqxiaLoadingScreen } from '@/components/eqxia'
+import { NornaLoadingScreen } from '@/components/workplace/NornaLoadingScreen'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
 import { RefreshButton } from '@/components/workplace/RefreshButton'
 
@@ -173,7 +173,7 @@ export default function PlanningPage() {
     setShowLeaves(true)
   }
 
-  if (loading) return <EqxiaLoadingScreen appName="Norna" />
+  if (loading) return <NornaLoadingScreen />
   if (error) return (
     <div style={{ padding: 40, color: 'var(--color-error)', fontSize: 'var(--fs-sm)' }}>
       Erreur : {error}{' '}

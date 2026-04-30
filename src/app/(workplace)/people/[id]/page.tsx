@@ -8,7 +8,7 @@ import { generateGrid, coversCell, leaveDurationDays, weekLabel, weekNumber, get
 import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
 import { RefreshButton } from '@/components/workplace/RefreshButton'
-import { EqxiaLoadingScreen } from '@/components/eqxia'
+import { NornaLoadingScreen } from '@/components/workplace/NornaLoadingScreen'
 import type { Allocation, WorkplaceEmployee } from '@/types/workplace'
 
 const WEEKS = 12
@@ -146,7 +146,7 @@ export default function PersonDetailPage({ params }: { params: Promise<{ id: str
     [cellsByWeek, allocations, personId],
   )
 
-  if (loading) return <EqxiaLoadingScreen appName="Norna" />
+  if (loading) return <NornaLoadingScreen />
   if (error)   return <div style={{ padding: 40, color: 'var(--color-error)' }}>Erreur : {error}</div>
   if (!person) return (
     <div style={{ ...CARD_STYLE, padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>

@@ -6,7 +6,7 @@ import { Calendar, Briefcase, Umbrella, AlertCircle } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { generateGrid, coversCell, leaveDurationDays, weekLabel, getMondayOf, toYMD } from '@/lib/workplace/grid'
 import { HOLIDAY_DATES_MU, HOLIDAYS_MU_2026 } from '@/lib/workplace/holidays'
-import { EqxiaLoadingScreen } from '@/components/eqxia'
+import { NornaLoadingScreen } from '@/components/workplace/NornaLoadingScreen'
 import { RefreshButton } from '@/components/workplace/RefreshButton'
 import type { Allocation } from '@/types/workplace'
 
@@ -99,7 +99,7 @@ export default function MePage() {
     return HOLIDAYS_MU_2026.find(h => h.date >= todayStr)
   }, [todayStr])
 
-  if (loading) return <EqxiaLoadingScreen appName="Norna" />
+  if (loading) return <NornaLoadingScreen />
   if (error) return <div style={{ padding: 40, color: 'var(--color-error)' }}>Erreur : {error}</div>
 
   if (!me) return (
