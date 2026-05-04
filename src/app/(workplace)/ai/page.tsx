@@ -54,10 +54,10 @@ const SUGGESTIONS: Record<Mode, string[]> = {
     'Qui peut prendre un consulting IA en France en décembre ?',
   ],
   qa: [
-    'Combien de jours de workshop sont confirmés ce trimestre ?',
-    'Quels projets actifs ont le plus d\'allocations ?',
+    'Combien d\'heures de workshop ont été délivrées ce mois ?',
+    'Quels projets sont en sur ou sous-livraison vs leur planning ?',
+    'Qui a logué le plus d\'heures sur les 30 derniers jours ?',
     'Quelle est la charge moyenne de l\'équipe sur les 4 prochaines semaines ?',
-    'Qui a pris le plus de congés cette année ?',
   ],
 }
 

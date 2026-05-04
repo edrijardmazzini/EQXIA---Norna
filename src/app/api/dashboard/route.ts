@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server'
-import type { WorkplaceEmployee, WorkplaceProject, Allocation } from '@/types/workplace'
+import type { WorkplaceEmployee, WorkplaceProject, Allocation, TimeEntry } from '@/types/workplace'
 
 const NOTION_VERSION = '2022-06-28'
-const EMPLOYEES_DB_ID   = process.env.NOTION_EMPLOYEES_DB_ID   || '107cb251-a49b-45c3-806e-b0edf20f44ec'
-const PROJECTS_DB_ID    = process.env.NOTION_PROJECTS_DB_ID    || '15933668-ad6e-49ea-902b-1c6bc2bce3dc'
-const ALLOCATIONS_DB_ID = process.env.NOTION_ALLOCATIONS_DB_ID || '7ae1822f-dfd0-41e0-9098-c03b97f93bd5'
-const CLIENTS_DB_ID     = process.env.NOTION_CLIENTS_DB_ID     || '1c4a4860-b36e-4ca2-a243-57446accbe53'
+const EMPLOYEES_DB_ID    = process.env.NOTION_EMPLOYEES_DB_ID    || '107cb251-a49b-45c3-806e-b0edf20f44ec'
+const PROJECTS_DB_ID     = process.env.NOTION_PROJECTS_DB_ID     || '15933668-ad6e-49ea-902b-1c6bc2bce3dc'
+const ALLOCATIONS_DB_ID  = process.env.NOTION_ALLOCATIONS_DB_ID  || '7ae1822f-dfd0-41e0-9098-c03b97f93bd5'
+const CLIENTS_DB_ID      = process.env.NOTION_CLIENTS_DB_ID      || '1c4a4860-b36e-4ca2-a243-57446accbe53'
+const TIME_ENTRIES_DB_ID = process.env.NOTION_TIME_ENTRIES_DB_ID || '61d3d22e-530c-493c-96cd-8f827355420a'
+
+// Fenêtre de fetch des time entries : 90 jours en arrière (pour comparer planifié vs réalisé)
+const TIME_ENTRIES_WINDOW_DAYS = 90
 
 function headers() {
   return {
@@ -78,11 +82,20 @@ const ACTIVE_PROJECT_STATUSES = new Set([
 
 export async function GET() {
   try {
-    const [employeesRaw, projectsRaw, allocationsRaw, clientsRaw] = await Promise.all([
+    // Borne basse pour les time entries
+    const timeEntriesFrom = new Date()
+    timeEntriesFrom.setDate(timeEntriesFrom.getDate() - TIME_ENTRIES_WINDOW_DAYS)
+    const timeEntriesFromStr = timeEntriesFrom.toISOString().slice(0, 10)
+
+    const [employeesRaw, projectsRaw, allocationsRaw, clientsRaw, timeEntriesRaw] = await Promise.all([
       queryAll(EMPLOYEES_DB_ID),
       queryAll(PROJECTS_DB_ID),
       queryAll(ALLOCATIONS_DB_ID),
       queryAll(CLIENTS_DB_ID),
+      queryAll(TIME_ENTRIES_DB_ID, {
+        property: 'Period',
+        date: { on_or_after: timeEntriesFromStr },
+      }),
     ])
 
     // Full employees lookup (incluant les Departed pour résoudre les owners legacy)
@@ -185,7 +198,23 @@ export async function GET() {
       } satisfies Allocation
     })
 
-    return NextResponse.json({ employees, projects, allocations })
+    // time entries (90 derniers jours, lecture seule)
+    const timeEntries: TimeEntry[] = timeEntriesRaw.map((t: any) => {
+      const props = t.properties as Record<string, any>
+      return {
+        id:          t.id,
+        description: getText(props['Description']),
+        personIds:   getRelationIds(props['Employee']),
+        projectIds:  getRelationIds(props['Project']),
+        date:        getDate(props['Period']),
+        endDate:     props['Period']?.date?.end || getDate(props['Period']),
+        hours:       getNumber(props['Hours']),
+        workType:    getSelect(props['Work Type']),
+        notes:       getText(props['Notes']),
+      } satisfies TimeEntry
+    })
+
+    return NextResponse.json({ employees, projects, allocations, timeEntries })
   } catch (error: any) {
     console.error('[norna] dashboard error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })

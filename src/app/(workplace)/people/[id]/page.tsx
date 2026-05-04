@@ -2,13 +2,14 @@
 
 import { useMemo, use, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Briefcase, Umbrella, MapPin, Mail, ExternalLink, Plus } from 'lucide-react'
+import { ArrowLeft, Briefcase, Umbrella, MapPin, Mail, ExternalLink, Plus, Clock } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { generateGrid, coversCell, leaveDurationDays, weekLabel, weekNumber, getMondayOf, toYMD, type GridCell } from '@/lib/workplace/grid'
 import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
+import { isForPerson, sumHours, fmtHours } from '@/lib/workplace/time-entries'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
 import { RefreshButton } from '@/components/workplace/RefreshButton'
-import type { Allocation, WorkplaceEmployee } from '@/types/workplace'
+import type { Allocation, WorkplaceEmployee, WorkplaceProject } from '@/types/workplace'
 
 const WEEKS = 12
 
@@ -76,7 +77,7 @@ function computeWeekLoad(personId: string, weekCells: GridCell[], allocations: A
 
 export default function PersonDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: personId } = use(params)
-  const { employees, projects, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
+  const { employees, projects, allocations, timeEntries, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
   const [modalState, setModalState] = useState<
     | { mode: 'closed' }
     | { mode: 'create' }
@@ -131,6 +132,47 @@ export default function PersonDetailPage({ params }: { params: Promise<{ id: str
       sickTaken,
     }
   }, [person, myAllocations])
+
+  // Time entries de la personne (90 derniers jours)
+  const myTimeEntries = useMemo(
+    () => timeEntries.filter(t => isForPerson(t, personId)),
+    [timeEntries, personId],
+  )
+
+  // Heures ce mois + 30 derniers jours
+  const hoursThisMonth = useMemo(() => {
+    const now = new Date()
+    const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    return sumHours(myTimeEntries.filter(t => t.date.startsWith(monthStr)))
+  }, [myTimeEntries])
+
+  const hoursLast30Days = useMemo(() => {
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 30)
+    const cutoffStr = toYMD(cutoff)
+    return sumHours(myTimeEntries.filter(t => t.date >= cutoffStr))
+  }, [myTimeEntries])
+
+  // Breakdown heures par projet (90 jours)
+  const hoursByProject = useMemo(() => {
+    const projectsMap = new Map<string, WorkplaceProject>()
+    for (const p of projects) projectsMap.set(p.id, p)
+    const m = new Map<string, { project: WorkplaceProject | null; projectName: string; hours: number }>()
+    for (const t of myTimeEntries) {
+      if (t.projectIds.length === 0) {
+        const key = '__no_project__'
+        const ex = m.get(key) || { project: null, projectName: t.workType || 'Sans projet', hours: 0 }
+        ex.hours += t.hours || 0
+        m.set(key, ex)
+        continue
+      }
+      const pid = t.projectIds[0]
+      const ex = m.get(pid) || { project: projectsMap.get(pid) || null, projectName: projectsMap.get(pid)?.name || 'Projet inconnu', hours: 0 }
+      ex.hours += t.hours || 0
+      m.set(pid, ex)
+    }
+    return Array.from(m.values()).sort((a, b) => b.hours - a.hours)
+  }, [myTimeEntries, projects])
 
   // Mini planning: 12-week capacity per week
   const monday = useMemo(() => getMondayOf(new Date()), [])
@@ -252,6 +294,19 @@ export default function PersonDetailPage({ params }: { params: Promise<{ id: str
           </div>
         </div>
 
+        <div style={{ ...CARD_STYLE, padding: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
+            <Clock size={11} /> Heures ce mois
+          </div>
+          <div style={{ fontSize: 'var(--fs-kpi)', fontWeight: 'var(--fw-kpi)' as React.CSSProperties['fontWeight'], letterSpacing: 'var(--ls-kpi)', color: 'var(--text-primary)', marginTop: 6, fontFamily: 'monospace' }}>
+            {hoursThisMonth.toFixed(0)}
+            <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-muted)', fontWeight: 600, marginLeft: 4 }}>h</span>
+          </div>
+          <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', marginTop: 2 }}>
+            {hoursLast30Days.toFixed(0)}h sur 30 jours · ≈ {(hoursThisMonth / 8).toFixed(1)} jours
+          </div>
+        </div>
+
         {balance && (
           <div style={{ ...CARD_STYLE, padding: 18 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
@@ -336,6 +391,45 @@ export default function PersonDetailPage({ params }: { params: Promise<{ id: str
           </table>
         </div>
       </div>
+
+      {/* Heures réelles par projet — 90 derniers jours */}
+      {hoursByProject.length > 0 && (
+        <div style={{ ...CARD_STYLE, padding: 0 }}>
+          <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)' }}>
+            <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }}>Heures réelles · 90 derniers jours</div>
+            <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', marginTop: 2 }}>
+              Répartition par projet à partir des Time Entries
+            </div>
+          </div>
+          {hoursByProject.slice(0, 10).map((row, idx) => {
+            const totalHours = hoursByProject.reduce((s, r) => s + r.hours, 0)
+            const pct = totalHours > 0 ? Math.round((row.hours / totalHours) * 100) : 0
+            return (
+              <div key={row.project?.id || row.projectName} style={{ padding: '11px 18px', borderTop: idx === 0 ? 'none' : '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600 }}>
+                    {row.project ? (
+                      <Link href={`/projects/${row.project.id}`} style={{ color: 'var(--text-primary)', textDecoration: 'none' }}>{row.projectName}</Link>
+                    ) : row.projectName}
+                  </div>
+                  {row.project && (
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                      {row.project.clientName || '—'} · {row.project.type}
+                    </div>
+                  )}
+                  <div style={{ marginTop: 6, height: 4, background: 'var(--bg-input)', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent)' }} />
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right', fontFamily: 'monospace', flexShrink: 0 }}>
+                  <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 700, color: 'var(--accent)' }}>{fmtHours(row.hours)}</div>
+                  <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>{pct}% · {(row.hours / 8).toFixed(1)} j</div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Upcoming allocations */}
       <div style={{ ...CARD_STYLE, padding: 0 }}>

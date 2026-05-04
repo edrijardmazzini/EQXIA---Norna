@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import type { WorkplaceEmployee, WorkplaceProject, Allocation } from '@/types/workplace'
+import type { WorkplaceEmployee, WorkplaceProject, Allocation, TimeEntry } from '@/types/workplace'
 import { HOLIDAYS_MU_2026 } from '@/lib/workplace/holidays'
 
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
@@ -18,8 +18,12 @@ Répondre à des questions analytiques sur l'équipe, les projets et les allocat
 # Schéma des données reçues
 - **employees** : id, name, role, pays (Maurice/France/Autre), specializations[], availability
 - **projects** : id, name, type (Workshop/Audit/Consulting/...), status, phase, clientName, ownerName, startDate, endDate
-- **allocations** : person (employee id), type (Project/Leave), projectType, projectId, from, to, status (Confirmed/Probable/Draft pour Project), approval (Pending/Approved/Rejected pour Leave), effort (0-100)
+- **allocations** PLANIFIÉES : person (employee id), type (Project/Leave), projectType, projectId, from, to, status (Confirmed/Probable/Draft pour Project), approval (Pending/Approved/Rejected pour Leave), effort (0-100)
+- **timeEntries** RÉALISÉ (90 derniers jours) : person, project, date (YYYY-MM-DD), hours, workType (Workshop delivery, Consulting, Training Prep, etc.). À utiliser pour comparer planifié vs réalisé, ou répondre à "Combien d'heures sur X ?".
 - **holidays** : fériés Maurice 2026
+
+# Conversion heures ↔ jours
+1 jour ouvré = 8 heures (convention Eqxia). Pour comparer allocations (planifiées en demi-jours) et timeEntries (réalisé en heures), convertir.
 
 # Règles métier
 - Une personne est **libre** sur une période si elle n'a aucune allocation Confirmed (projet) ni Approved (congé) qui chevauche
@@ -65,7 +69,7 @@ export async function POST(req: NextRequest) {
     if (!dashRes.ok) {
       return NextResponse.json({ error: 'Impossible de récupérer les données équipe' }, { status: 502 })
     }
-    const data = await dashRes.json() as { employees: WorkplaceEmployee[]; projects: WorkplaceProject[]; allocations: Allocation[] }
+    const data = await dashRes.json() as { employees: WorkplaceEmployee[]; projects: WorkplaceProject[]; allocations: Allocation[]; timeEntries: TimeEntry[] }
 
     const todayStr = new Date().toISOString().slice(0, 10)
 
@@ -106,6 +110,15 @@ export async function POST(req: NextRequest) {
 
     const holidays = HOLIDAYS_MU_2026.map(h => ({ date: h.date, name: h.name }))
 
+    // Time entries des 90 derniers jours (déjà filtré côté dashboard)
+    const timeEntries = (data.timeEntries || []).map(t => ({
+      person: t.personIds[0],
+      project: t.projectIds[0] || null,
+      date: t.date,
+      hours: t.hours,
+      workType: t.workType || null,
+    }))
+
     const userMessage = `# Date du jour
 ${todayStr}
 
@@ -115,8 +128,11 @@ ${JSON.stringify(employees)}
 # Projects (${projects.length})
 ${JSON.stringify(projects)}
 
-# Allocations (${allocations.length})
+# Allocations PLANIFIÉES (${allocations.length})
 ${JSON.stringify(allocations)}
+
+# Time Entries RÉALISÉ — 90 derniers jours (${timeEntries.length})
+${JSON.stringify(timeEntries)}
 
 # Holidays MU 2026
 ${JSON.stringify(holidays)}

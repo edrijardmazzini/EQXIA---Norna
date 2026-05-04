@@ -8,6 +8,9 @@ import { useToast } from '@/components/workplace/ToastProvider'
 import { generateGrid, coversCell, weekLabel, weekNumber, getMondayOf, type GridCell } from '@/lib/workplace/grid'
 import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
 import { skillMatch, expectedSkillsFor } from '@/lib/workplace/skills'
+import {
+  isInProject, sumHours, plannedHoursForProject, varianceSignal, fmtHours, hoursToDays,
+} from '@/lib/workplace/time-entries'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
 import { RefreshButton } from '@/components/workplace/RefreshButton'
 import type { Allocation, WorkplaceEmployee } from '@/types/workplace'
@@ -110,7 +113,7 @@ function scoreCandidates(
 export default function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: projectId } = use(params)
   const toast = useToast()
-  const { employees, projects, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
+  const { employees, projects, allocations, timeEntries, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
   const [modalState, setModalState] = useState<
     | { mode: 'closed' }
     | { mode: 'create'; personId?: string }
@@ -210,6 +213,45 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
     const pool = employees.filter(e => !allocatedPeopleIds.has(e.id))
     return scoreCandidates(pool, project.type, cells, projectAllocations, allocations).slice(0, 8)
   }, [project, employees, allocatedPeopleIds, cells, projectAllocations, allocations])
+
+  // Time entries logguées sur ce projet (90 derniers jours)
+  const projectTimeEntries = useMemo(
+    () => timeEntries.filter(t => isInProject(t, projectId)),
+    [timeEntries, projectId],
+  )
+
+  // Breakdown par personne : qui a logué quoi sur ce projet ?
+  const realisedByPerson = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const t of projectTimeEntries) {
+      for (const pid of t.personIds) {
+        m.set(pid, (m.get(pid) || 0) + (t.hours || 0))
+      }
+    }
+    return m
+  }, [projectTimeEntries])
+
+  // IDs concernés = staffés OU ayant logué sans être staffés (intéressant à surfacer)
+  const relevantPeopleIds = useMemo(() => {
+    const set = new Set<string>(allocatedPeopleIds)
+    for (const id of realisedByPerson.keys()) set.add(id)
+    return set
+  }, [allocatedPeopleIds, realisedByPerson])
+
+  const totalRealisedHours = useMemo(() => sumHours(projectTimeEntries), [projectTimeEntries])
+
+  const totalPlannedHours = useMemo(() => {
+    let h = 0
+    for (const personId of allocatedPeopleIds) {
+      h += plannedHoursForProject(allocations, personId, projectId)
+    }
+    return h
+  }, [allocatedPeopleIds, allocations, projectId])
+
+  const totalVariance = useMemo(
+    () => varianceSignal(totalPlannedHours, totalRealisedHours),
+    [totalPlannedHours, totalRealisedHours],
+  )
 
   if (error)   return <div style={{ padding: 40, color: 'var(--color-error)' }}>Erreur : {error}</div>
   if (!project) return (
@@ -388,6 +430,132 @@ export default function ProjectDetailPage({ params }: { params: Promise<{ id: st
               </tbody>
             </table>
           </div>
+        )}
+      </div>
+
+      {/* Planifié vs Réalisé */}
+      <div style={{ ...CARD_STYLE, padding: 0 }}>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600 }}>Planifié vs Réalisé</div>
+            <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', marginTop: 2 }}>
+              Comparaison des allocations Confirmed avec les heures loguées dans Time Entries · 90 derniers jours
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 16, fontFamily: 'monospace' }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>Planifié</div>
+              <div style={{ fontSize: 'var(--fs-md)', fontWeight: 700, color: 'var(--text-primary)' }}>{fmtHours(totalPlannedHours)}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>≈ {hoursToDays(totalPlannedHours).toFixed(1)} j</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>Réalisé</div>
+              <div style={{ fontSize: 'var(--fs-md)', fontWeight: 700, color: 'var(--accent)' }}>{fmtHours(totalRealisedHours)}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>≈ {hoursToDays(totalRealisedHours).toFixed(1)} j</div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>Variance</div>
+              <div style={{
+                fontSize: 'var(--fs-md)',
+                fontWeight: 700,
+                color: totalVariance.state === 'over'      ? '#ef4444'
+                     : totalVariance.state === 'under'     ? '#facc15'
+                     : totalVariance.state === 'on-track'  ? '#22c55e'
+                     : 'var(--text-muted)',
+              }}>
+                {totalVariance.state === 'no-plan' || totalVariance.state === 'no-actual'
+                  ? '—'
+                  : `${totalVariance.delta >= 0 ? '+' : ''}${totalVariance.delta.toFixed(1)}h`}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                {totalVariance.state === 'over'      ? 'sur-livraison'
+                 : totalVariance.state === 'under'   ? 'sous-livraison'
+                 : totalVariance.state === 'on-track' ? 'on track'
+                 : totalVariance.state === 'no-plan'  ? 'aucun plan'
+                 :                                       'aucune log'}
+              </div>
+            </div>
+          </div>
+        </div>
+        {relevantPeopleIds.size === 0 ? (
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-muted)', fontSize: 'var(--fs-xs)', fontStyle: 'italic' }}>
+            Aucune donnée pour ce projet (ni allocation, ni heure loguée).
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--fs-xs)' }}>
+            <thead>
+              <tr style={{ background: 'var(--bg-input)' }}>
+                {['Personne', 'Planifié', 'Réalisé', 'Variance', 'État'].map((h, i) => (
+                  <th key={h} style={{
+                    padding: '8px 14px',
+                    textAlign: i === 0 ? 'left' : 'right',
+                    color: 'var(--text-muted)',
+                    fontWeight: 500,
+                    fontSize: 'var(--fs-2xs)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    whiteSpace: 'nowrap',
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from(relevantPeopleIds).map((pid, idx) => {
+                const emp = employeesById.get(pid)
+                const planned = plannedHoursForProject(allocations, pid, projectId)
+                const actual  = realisedByPerson.get(pid) || 0
+                const v = varianceSignal(planned, actual)
+                const stateColor =
+                  v.state === 'over'      ? '#ef4444' :
+                  v.state === 'under'     ? '#facc15' :
+                  v.state === 'on-track'  ? '#22c55e' :
+                                            'var(--text-muted)'
+                const stateLabel =
+                  v.state === 'over'      ? 'Sur-livraison' :
+                  v.state === 'under'     ? 'Sous-livraison' :
+                  v.state === 'on-track'  ? 'On track' :
+                  v.state === 'no-plan'   ? 'Hors plan' :
+                                            'Pas logué'
+                return (
+                  <tr key={pid} style={{ borderTop: '1px solid var(--border-subtle)', background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)' }}>
+                    <td style={{ padding: '8px 14px', fontWeight: 600 }}>
+                      {emp ? (
+                        <Link href={`/people/${emp.id}`} style={{ color: 'var(--text-primary)', textDecoration: 'none' }}>{emp.name}</Link>
+                      ) : '?'}
+                      {emp && !allocatedPeopleIds.has(pid) && (
+                        <span style={{ marginLeft: 6, padding: '1px 6px', borderRadius: 'var(--radius-badge)', background: 'rgba(167, 139, 250, 0.12)', color: '#c084fc', fontSize: 9, fontWeight: 600 }}>
+                          hors staffing
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'monospace' }}>
+                      {planned > 0 ? fmtHours(planned) : '—'}
+                    </td>
+                    <td style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--accent)' }}>
+                      {actual > 0 ? fmtHours(actual) : '—'}
+                    </td>
+                    <td style={{ padding: '8px 14px', textAlign: 'right', fontFamily: 'monospace', color: stateColor, fontWeight: 600 }}>
+                      {v.state === 'no-plan' || v.state === 'no-actual'
+                        ? '—'
+                        : `${v.delta >= 0 ? '+' : ''}${v.delta.toFixed(1)}h`}
+                    </td>
+                    <td style={{ padding: '8px 14px', textAlign: 'right' }}>
+                      <span style={{
+                        padding: '2px 9px',
+                        borderRadius: 'var(--radius-badge)',
+                        background: `${stateColor}22`,
+                        color: stateColor,
+                        fontSize: 'var(--fs-2xs)',
+                        fontWeight: 600,
+                      }}>
+                        {stateLabel}
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
         )}
       </div>
 

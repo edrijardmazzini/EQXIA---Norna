@@ -2,10 +2,11 @@
 
 import { useMemo } from 'react'
 import { useSession } from 'next-auth/react'
-import { Calendar, Briefcase, Umbrella, AlertCircle } from 'lucide-react'
+import { Calendar, Briefcase, Umbrella, AlertCircle, Clock } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { generateGrid, coversCell, leaveDurationDays, weekLabel, getMondayOf, toYMD } from '@/lib/workplace/grid'
 import { HOLIDAY_DATES_MU, HOLIDAYS_MU_2026 } from '@/lib/workplace/holidays'
+import { isForPerson, sumHours, fmtHours } from '@/lib/workplace/time-entries'
 import { RefreshButton } from '@/components/workplace/RefreshButton'
 import type { Allocation } from '@/types/workplace'
 
@@ -37,7 +38,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function MePage() {
   const { data: session } = useSession()
-  const { employees, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
+  const { employees, allocations, timeEntries, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
 
   const me = useMemo(
     () => employees.find(e => e.email && session?.user?.email && e.email.toLowerCase() === session.user.email.toLowerCase()),
@@ -93,6 +94,23 @@ export default function MePage() {
     return { quota, taken, pending, remaining: quota - taken - pending }
   }, [me, myAllocations])
 
+  // Heures loguées ce mois (Time Entries)
+  const myHoursThisMonth = useMemo(() => {
+    if (!me) return 0
+    const now = new Date()
+    const monthStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+    return sumHours(timeEntries.filter(t => isForPerson(t, me.id) && t.date.startsWith(monthStr)))
+  }, [me, timeEntries])
+
+  // Heures loguées 30 derniers jours
+  const myHoursLast30Days = useMemo(() => {
+    if (!me) return 0
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 30)
+    const cutoffStr = toYMD(cutoff)
+    return sumHours(timeEntries.filter(t => isForPerson(t, me.id) && t.date >= cutoffStr))
+  }, [me, timeEntries])
+
   // Next holiday
   const nextHoliday = useMemo(() => {
     return HOLIDAYS_MU_2026.find(h => h.date >= todayStr)
@@ -139,6 +157,19 @@ export default function MePage() {
           </div>
           <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', marginTop: 2 }}>
             allocation{thisWeekAllocs.length > 1 ? 's' : ''} active{thisWeekAllocs.length > 1 ? 's' : ''}
+          </div>
+        </div>
+
+        <div style={CARD_STYLE}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
+            <Clock size={11} /> Heures ce mois
+          </div>
+          <div style={{ fontSize: 'var(--fs-kpi)', fontWeight: 'var(--fw-kpi)' as React.CSSProperties['fontWeight'], letterSpacing: 'var(--ls-kpi)', color: 'var(--text-primary)', marginTop: 6, fontFamily: 'monospace' }}>
+            {myHoursThisMonth.toFixed(0)}
+            <span style={{ fontSize: 'var(--fs-md)', color: 'var(--text-muted)', fontWeight: 600, marginLeft: 4 }}>h</span>
+          </div>
+          <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', marginTop: 2 }}>
+            {myHoursLast30Days.toFixed(0)}h sur 30 jours · ≈ {(myHoursThisMonth / 8).toFixed(1)} jours
           </div>
         </div>
 

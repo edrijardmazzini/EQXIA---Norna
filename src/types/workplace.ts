@@ -54,8 +54,21 @@ export interface Allocation {
   notes: string
 }
 
+export interface TimeEntry {
+  id: string
+  description: string
+  personIds: string[]
+  projectIds: string[]
+  date: string         // YYYY-MM-DD (start of Period)
+  endDate: string      // YYYY-MM-DD (end of Period if range, else same as date)
+  hours: number
+  workType: string     // ex: 'Workshop delivery', 'Consulting', 'Training Prep', etc.
+  notes: string
+}
+
 export interface WorkplaceDashboard {
   employees: WorkplaceEmployee[]
   projects: WorkplaceProject[]
   allocations: Allocation[]
+  timeEntries: TimeEntry[]
 }

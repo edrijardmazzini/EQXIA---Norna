@@ -12,7 +12,7 @@ interface WorkplaceDataContext extends WorkplaceDashboard {
   reload: () => void
 }
 
-const EMPTY: WorkplaceDashboard = { employees: [], projects: [], allocations: [] }
+const EMPTY: WorkplaceDashboard = { employees: [], projects: [], allocations: [], timeEntries: [] }
 const AUTO_POLL_MS = 5 * 60 * 1000 // 5 minutes
 
 const Ctx = createContext<WorkplaceDataContext | null>(null)
