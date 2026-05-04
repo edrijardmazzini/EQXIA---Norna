@@ -117,7 +117,7 @@ export default function PlanningPage() {
   const { employees, projects, allocations, loading, refreshing, error, reload, lastFetchAt } = useWorkplaceData()
 
   // Navigation state
-  const [weeksCount, setWeeksCount] = useState<4 | 8 | 12>(8)
+  const [weeksCount, setWeeksCount] = useState<4 | 8 | 12>(4)
   const [weekOffset, setWeekOffset] = useState(0) // 0 = current week, +1 = next week, -1 = prev
 
   // Filters
@@ -402,6 +402,8 @@ export default function PlanningPage() {
       ) : (
         <div style={{
           overflowX: 'auto',
+          overflowY: 'auto',
+          maxHeight: 'calc(100vh - 320px)',
           background: 'var(--card-bg)',
           backdropFilter: 'var(--card-blur)',
           WebkitBackdropFilter: 'var(--card-blur)',
@@ -415,9 +417,20 @@ export default function PlanningPage() {
               <col style={{ width: 140 }} />
               {cells.map((_, i) => <col key={i} style={{ width: 18 }} />)}
             </colgroup>
-            <thead>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 3, background: 'var(--bg-card)' }}>
               <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                <th style={{ padding: '8px 14px', textAlign: 'left', color: 'var(--text-muted)', fontSize: 'var(--fs-2xs)', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                <th style={{
+                  padding: '8px 14px',
+                  textAlign: 'left',
+                  color: 'var(--text-muted)',
+                  fontSize: 'var(--fs-2xs)',
+                  fontWeight: 500,
+                  whiteSpace: 'nowrap',
+                  position: 'sticky',
+                  left: 0,
+                  zIndex: 4,
+                  background: 'var(--bg-card)',
+                }}>
                   Équipe
                 </th>
                 {weekStarts.map(ws => (
@@ -430,13 +443,19 @@ export default function PlanningPage() {
                     borderLeft: '1px solid var(--border-subtle)',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
+                    background: 'var(--bg-card)',
                   }}>
                     {weekLabel(ws)}
                   </th>
                 ))}
               </tr>
-              <tr style={{ borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-input)' }}>
-                <th />
+              <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                <th style={{
+                  position: 'sticky',
+                  left: 0,
+                  zIndex: 4,
+                  background: 'var(--bg-input)',
+                }} />
                 {weekStarts.flatMap((ws, wi) =>
                   DAY_LABELS.map((day, di) => {
                     const dayDate = new Date(ws + 'T00:00:00')
@@ -453,7 +472,7 @@ export default function PlanningPage() {
                           fontWeight: isToday ? 700 : 500,
                           color: isToday ? 'var(--accent)' : 'var(--text-muted)',
                           borderLeft: di === 0 ? '1px solid var(--border-subtle)' : undefined,
-                          background: isToday ? 'var(--accent-soft)' : undefined,
+                          background: isToday ? 'var(--accent-soft)' : 'var(--bg-input)',
                         }}
                       >
                         {day}
@@ -479,7 +498,17 @@ export default function PlanningPage() {
                       background: empIdx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)',
                     }}
                   >
-                    <td style={{ padding: '0 14px', height: rowHeight, whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
+                    <td style={{
+                      padding: '0 14px',
+                      height: rowHeight,
+                      whiteSpace: 'nowrap',
+                      verticalAlign: 'middle',
+                      position: 'sticky',
+                      left: 0,
+                      zIndex: 1,
+                      // Couleur de fond pour cacher le contenu qui passe derrière (sticky)
+                      background: empIdx % 2 === 0 ? 'var(--bg-card)' : 'var(--bg-card-hover)',
+                    }}>
                       <Link href={`/people/${emp.id}`} style={{ textDecoration: 'none', display: 'block' }}>
                         <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>
                           {emp.name}
