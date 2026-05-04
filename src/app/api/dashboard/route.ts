@@ -168,6 +168,7 @@ export async function GET() {
           ownerName,
           ownerIds,
           health:      props['Health']?.formula?.string || '',
+          allocated:   props['Alloué']?.formula?.boolean ?? false,
         } satisfies WorkplaceProject
       })
       .filter(Boolean) as WorkplaceProject[]

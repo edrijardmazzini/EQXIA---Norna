@@ -56,8 +56,23 @@ function ProjectRow({ project, allocCount, peopleCount }: { project: WorkplacePr
       }} />
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+        <div style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', display: 'flex', alignItems: 'center', gap: 8 }}>
           {project.name}
+          {DELIVERY_STATUSES.has(project.status) && !project.allocated && (
+            <span style={{
+              padding: '1px 7px',
+              borderRadius: 'var(--radius-badge)',
+              background: 'rgba(167, 139, 250, 0.15)',
+              color: '#a78bfa',
+              fontSize: 9,
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              flexShrink: 0,
+            }}>
+              Pas alloué
+            </span>
+          )}
         </div>
         <div style={{ fontSize: 'var(--fs-2xs)', color: 'var(--text-muted)', marginTop: 2 }}>
           {project.clientName || '—'} · {project.type || '—'} {project.phase && `· ${project.phase}`}

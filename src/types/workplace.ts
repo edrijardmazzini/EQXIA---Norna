@@ -26,6 +26,7 @@ export interface WorkplaceProject {
   ownerName: string
   ownerIds: string[]
   health: string
+  allocated: boolean    // Formula 'Alloué' depuis Notion (length(Allocations) > 0)
 }
 
 export type AllocationType = 'Project' | 'Leave' | 'Public Holiday'

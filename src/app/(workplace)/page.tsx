@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { Plus, ChevronLeft, ChevronRight, CalendarDays, Filter } from 'lucide-react'
 import { useWorkplaceData } from '@/hooks/useWorkplaceData'
 import { HOLIDAY_DATES_MU } from '@/lib/workplace/holidays'
-import { generateGrid, coversCell, weekLabel, getMondayOf, toYMD, DAY_LABELS, type GridCell } from '@/lib/workplace/grid'
+import { generateGrid, coversCell, weekLabel, getMondayOf, toYMD, DAY_LABELS, computeTracks, type GridCell } from '@/lib/workplace/grid'
 import type { Allocation, AllocationStatus } from '@/types/workplace'
 import { AllocationModal } from '@/components/workplace/AllocationModal'
 import { RefreshButton } from '@/components/workplace/RefreshButton'
@@ -33,22 +33,50 @@ function typeColor(alloc: Allocation): string {
   return TYPE_COLORS[alloc.projectType] || '#6b7280'
 }
 
-type CellMap = Map<string, Map<string, Allocation>>
+// Map<personId, Map<cellKey, Map<trackIdx, Allocation>>>
+// Pour chaque cellule, on conserve TOUTES les allocations qui la couvrent
+// indexées par leur trackIdx (pour empilement vertical sans overlap)
+type CellTracksMap = Map<string, Map<string, Map<number, Allocation>>>
 
-function buildCellMap(allocations: Allocation[], cells: GridCell[]): CellMap {
-  const map: CellMap = new Map()
-  for (const alloc of allocations) {
-    for (const personId of alloc.personIds) {
-      if (!map.has(personId)) map.set(personId, new Map())
-      const personMap = map.get(personId)!
-      for (const cell of cells) {
-        if (coversCell(alloc, cell)) {
-          personMap.set(`${cell.date}:${cell.half[0]}`, alloc)
-        }
-      }
+interface PersonRowMeta {
+  numTracks: number
+  cellTracks: Map<string, Map<number, Allocation>>  // cellKey → (trackIdx → Allocation)
+  // Pour savoir si on est sur la "tête" de l'allocation (pour afficher le %)
+  allocStartCellKeys: Set<string>                    // `${allocId}:${cellKey}` si c'est le 1er cell de l'alloc
+}
+
+function buildPersonRowMeta(allocations: Allocation[], cells: GridCell[]): Map<string, PersonRowMeta> {
+  const result = new Map<string, PersonRowMeta>()
+  // 1) Group allocations by person
+  const byPerson = new Map<string, Allocation[]>()
+  for (const a of allocations) {
+    for (const pid of a.personIds) {
+      if (!byPerson.has(pid)) byPerson.set(pid, [])
+      byPerson.get(pid)!.push(a)
     }
   }
-  return map
+  // 2) For each person : compute tracks + cellTracks
+  for (const [personId, personAllocs] of byPerson) {
+    const { allocToTrack, numTracks } = computeTracks(personAllocs)
+    const cellTracks = new Map<string, Map<number, Allocation>>()
+    const allocStartCellKeys = new Set<string>()
+
+    for (const alloc of personAllocs) {
+      const trackIdx = allocToTrack.get(alloc.id) ?? 0
+      let firstCellKey: string | null = null
+      for (const cell of cells) {
+        if (!coversCell(alloc, cell)) continue
+        const cellKey = `${cell.date}:${cell.half[0]}`
+        if (!cellTracks.has(cellKey)) cellTracks.set(cellKey, new Map())
+        cellTracks.get(cellKey)!.set(trackIdx, alloc)
+        if (firstCellKey === null) firstCellKey = cellKey
+      }
+      if (firstCellKey !== null) allocStartCellKeys.add(`${alloc.id}:${firstCellKey}`)
+    }
+
+    result.set(personId, { numTracks, cellTracks, allocStartCellKeys })
+  }
+  return result
 }
 
 function LegendItem({ color, label }: { color: string; label: string }) {
@@ -134,18 +162,23 @@ export default function PlanningPage() {
     })
   }, [allocations, enabledTypes, enabledStatuses, showLeaves])
 
-  const cellMap = useMemo(() => buildCellMap(filteredAllocations, cells), [filteredAllocations, cells])
+  const personRowMeta = useMemo(() => buildPersonRowMeta(filteredAllocations, cells), [filteredAllocations, cells])
 
   const totalCapacity = employees.length * 10 * weeksCount
   const totalBooked = useMemo(() => {
-    let count = 0
-    for (const [, personMap] of cellMap) {
-      for (const [, alloc] of personMap) {
-        if (alloc.type === 'Project' && alloc.status === 'Confirmed') count++
+    // Charge confirmed = somme des effort% sur cellules confirmed (en demi-jours-équivalent-temps-plein)
+    let halfDaysEquiv = 0
+    for (const [, meta] of personRowMeta) {
+      for (const [, tracksMap] of meta.cellTracks) {
+        for (const [, alloc] of tracksMap) {
+          if (alloc.type === 'Project' && alloc.status === 'Confirmed') {
+            halfDaysEquiv += (alloc.effortPct ?? 100) / 100
+          }
+        }
       }
     }
-    return count
-  }, [cellMap])
+    return Math.round(halfDaysEquiv)
+  }, [personRowMeta])
   const bookedPct = totalCapacity > 0 ? Math.round(totalBooked / totalCapacity * 100) : 0
 
   const totalEnabledFilters = enabledTypes.size + enabledStatuses.size + (showLeaves ? 1 : 0)
@@ -432,7 +465,12 @@ export default function PlanningPage() {
             </thead>
             <tbody>
               {employees.map((emp, empIdx) => {
-                const personMap = cellMap.get(emp.id)
+                const meta = personRowMeta.get(emp.id)
+                const numTracks = meta?.numTracks ?? 1
+                const SUBROW_HEIGHT = 24
+                const rowHeight = Math.max(36, numTracks * SUBROW_HEIGHT)
+                const todayStr = toYMD(new Date())
+
                 return (
                   <tr
                     key={emp.id}
@@ -441,47 +479,29 @@ export default function PlanningPage() {
                       background: empIdx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.01)',
                     }}
                   >
-                    <td style={{ padding: '0 14px', height: 36, whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '0 14px', height: rowHeight, whiteSpace: 'nowrap', verticalAlign: 'middle' }}>
                       <Link href={`/people/${emp.id}`} style={{ textDecoration: 'none', display: 'block' }}>
                         <div style={{ fontSize: 'var(--fs-xs)', fontWeight: 600, color: 'var(--text-primary)' }}>
                           {emp.name}
                         </div>
                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 1 }}>
-                          {emp.role}
+                          {emp.role}{numTracks > 1 ? ` · ${numTracks} en parallèle` : ''}
                         </div>
                       </Link>
                     </td>
 
-                    {cells.map((cell, ci) => {
+                    {cells.map((cell) => {
                       const key = `${cell.date}:${cell.half[0]}`
-                      const alloc = personMap?.get(key)
+                      const tracksAtCell = meta?.cellTracks.get(key)
                       const isHoliday = HOLIDAY_DATES_MU.has(cell.date)
-                      const todayStr = toYMD(new Date())
                       const isToday = cell.date === todayStr
-                      const prevKey = ci > 0 ? `${cells[ci - 1].date}:${cells[ci - 1].half[0]}` : null
-                      const nextKey = ci < cells.length - 1 ? `${cells[ci + 1].date}:${cells[ci + 1].half[0]}` : null
-                      const prevAlloc = prevKey ? personMap?.get(prevKey) : undefined
-                      const nextAlloc = nextKey ? personMap?.get(nextKey) : undefined
-                      const isStart = !!(alloc && alloc !== prevAlloc)
-                      const isEnd   = !!(alloc && alloc !== nextAlloc)
 
-                      const color = alloc ? typeColor(alloc) : undefined
-                      let bg: string | undefined
-                      let border: string | undefined
-
-                      if (alloc) {
-                        if (alloc.status === 'Confirmed' || alloc.type === 'Leave') {
-                          bg = color
-                        } else if (alloc.status === 'Probable') {
-                          bg = `repeating-linear-gradient(45deg, ${color}, ${color} 2px, transparent 2px, transparent 5px)`
-                        } else {
-                          bg = 'transparent'
-                          border = `1.5px solid ${color}`
-                        }
-                      } else if (isHoliday) {
-                        bg = 'repeating-linear-gradient(90deg, var(--border-subtle) 0px, var(--border-subtle) 1px, transparent 1px, transparent 4px)'
-                      } else if (isToday) {
-                        bg = 'rgba(166, 201, 206, 0.06)'
+                      // Background du <td> : férié, today, ou neutre
+                      let cellBg: string | undefined
+                      if (isHoliday && !tracksAtCell) {
+                        cellBg = 'repeating-linear-gradient(90deg, var(--border-subtle) 0px, var(--border-subtle) 1px, transparent 1px, transparent 4px)'
+                      } else if (isToday && !tracksAtCell) {
+                        cellBg = 'rgba(166, 201, 206, 0.06)'
                       }
 
                       const borderLeftExtra = cell.half === 'Morning' && cell.dayOfWeek === 0
@@ -490,32 +510,111 @@ export default function PlanningPage() {
                           ? '1px solid var(--accent)'
                           : undefined
 
+                      // Title aggregate : si plusieurs allocs, on affiche tout
+                      const titleParts: string[] = []
+                      if (tracksAtCell) {
+                        for (const alloc of tracksAtCell.values()) {
+                          const status = alloc.type === 'Leave' ? alloc.approvalStatus : alloc.status
+                          const label = alloc.type === 'Leave' ? `Congé ${alloc.leaveType}` : alloc.projectName
+                          titleParts.push(`${label} · ${alloc.effortPct}% (${status})`)
+                        }
+                      }
+                      const titleText = titleParts.length > 0
+                        ? `${emp.name}\n${titleParts.join('\n')}`
+                        : (isHoliday ? 'Férié MU' : 'Cliquer pour créer une allocation')
+
                       return (
                         <td
                           key={key}
-                          title={alloc
-                            ? `${emp.name} — ${alloc.type === 'Leave' ? `Congé ${alloc.leaveType}` : alloc.projectName} (${alloc.status || alloc.approvalStatus})`
-                            : isHoliday
-                              ? 'Férié MU'
-                              : 'Cliquer pour créer une allocation'}
+                          title={titleText}
                           onClick={() => {
-                            if (alloc) {
-                              setModalState({ mode: 'edit', allocation: alloc })
-                            } else {
+                            // Click sur un cell : si exactement une alloc → edit, sinon → create
+                            const allocs = tracksAtCell ? Array.from(tracksAtCell.values()) : []
+                            if (allocs.length === 1) {
+                              setModalState({ mode: 'edit', allocation: allocs[0] })
+                            } else if (allocs.length === 0) {
                               setModalState({ mode: 'create', personId: emp.id, date: cell.date })
+                            } else {
+                              // Plusieurs allocs : on ouvre la première (ou on pourrait afficher un menu)
+                              setModalState({ mode: 'edit', allocation: allocs[0] })
                             }
                           }}
                           style={{
-                            height: 36,
+                            height: rowHeight,
                             width: 18,
                             padding: 0,
-                            background: bg,
-                            border: border || undefined,
-                            borderRadius: isStart && isEnd ? 3 : isStart ? '3px 0 0 3px' : isEnd ? '0 3px 3px 0' : 0,
+                            background: cellBg,
                             borderLeft: borderLeftExtra,
                             cursor: 'pointer',
+                            verticalAlign: 'top',
                           }}
-                        />
+                        >
+                          {/* Stack vertical : un slot par track */}
+                          <div style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            height: '100%',
+                            width: '100%',
+                          }}>
+                            {Array.from({ length: numTracks }, (_, trackIdx) => {
+                              const alloc = tracksAtCell?.get(trackIdx)
+                              const slotHeight = rowHeight / numTracks
+
+                              if (!alloc) {
+                                return <div key={trackIdx} style={{ height: slotHeight }} />
+                              }
+
+                              const color = typeColor(alloc)
+                              const isAllocStart = meta?.allocStartCellKeys.has(`${alloc.id}:${key}`) ?? false
+                              const isProjectConfirmed = alloc.type === 'Project' && alloc.status === 'Confirmed'
+                              const isLeave = alloc.type === 'Leave'
+                              const isProbable = alloc.type === 'Project' && alloc.status === 'Probable'
+                              const isDraft = alloc.type === 'Project' && alloc.status === 'Draft'
+
+                              let barBg: string | undefined
+                              let barBorder: string | undefined
+                              if (isProjectConfirmed || isLeave) barBg = color
+                              else if (isProbable) barBg = `repeating-linear-gradient(45deg, ${color}, ${color} 2px, transparent 2px, transparent 5px)`
+                              else if (isDraft) { barBg = 'transparent'; barBorder = `1.5px solid ${color}` }
+
+                              const showEffortLabel = isAllocStart && (alloc.effortPct ?? 100) < 100
+
+                              return (
+                                <div
+                                  key={trackIdx}
+                                  style={{
+                                    height: slotHeight,
+                                    background: barBg,
+                                    border: barBorder,
+                                    margin: '1px 0',
+                                    boxSizing: 'border-box',
+                                    position: 'relative',
+                                    overflow: 'visible',
+                                  }}
+                                >
+                                  {showEffortLabel && (
+                                    <span style={{
+                                      position: 'absolute',
+                                      top: '50%',
+                                      left: 2,
+                                      transform: 'translateY(-50%)',
+                                      fontSize: 9,
+                                      fontWeight: 700,
+                                      color: '#ffffff',
+                                      textShadow: '0 0 2px rgba(0,0,0,0.6)',
+                                      fontFamily: 'monospace',
+                                      whiteSpace: 'nowrap',
+                                      pointerEvents: 'none',
+                                      zIndex: 2,
+                                    }}>
+                                      {alloc.effortPct}%
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </td>
                       )
                     })}
                   </tr>

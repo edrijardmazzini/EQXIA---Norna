@@ -77,6 +77,53 @@ export function weekNumber(dateStr: string): number {
 
 export const DAY_LABELS = ['Lu', 'Ma', 'Me', 'Je', 'Ve'] as const
 
+// Range arithmetic -----------------------------------------------------------
+
+function compareDateHalf(aDate: string, aHalf: HalfDay, bDate: string, bHalf: HalfDay): number {
+  if (aDate !== bDate) return aDate < bDate ? -1 : 1
+  const aIdx = aHalf === 'Morning' ? 0 : 1
+  const bIdx = bHalf === 'Morning' ? 0 : 1
+  return aIdx - bIdx
+}
+
+// Greedy interval scheduling : assigne à chaque allocation un track index
+// (0, 1, 2…) tel que deux allocations du même track ne se chevauchent pas en
+// demi-journées. Retourne la map allocId → trackIdx et le nombre de tracks.
+export function computeTracks(allocations: Allocation[]): {
+  allocToTrack: Map<string, number>
+  numTracks: number
+} {
+  const sorted = [...allocations].sort((a, b) => {
+    const startCmp = compareDateHalf(a.startDate, a.startHalf, b.startDate, b.startHalf)
+    if (startCmp !== 0) return startCmp
+    return compareDateHalf(a.endDate, a.endHalf, b.endDate, b.endHalf)
+  })
+
+  const trackEnds: { date: string; half: HalfDay }[] = []
+  const allocToTrack = new Map<string, number>()
+
+  for (const alloc of sorted) {
+    if (!alloc.startDate || !alloc.endDate) continue
+    let placed = false
+    for (let i = 0; i < trackEnds.length; i++) {
+      const lastEnd = trackEnds[i]
+      // alloc démarre strictement APRÈS la fin du dernier alloc de ce track
+      if (compareDateHalf(alloc.startDate, alloc.startHalf, lastEnd.date, lastEnd.half) > 0) {
+        allocToTrack.set(alloc.id, i)
+        trackEnds[i] = { date: alloc.endDate, half: alloc.endHalf }
+        placed = true
+        break
+      }
+    }
+    if (!placed) {
+      allocToTrack.set(alloc.id, trackEnds.length)
+      trackEnds.push({ date: alloc.endDate, half: alloc.endHalf })
+    }
+  }
+
+  return { allocToTrack, numTracks: Math.max(1, trackEnds.length) }
+}
+
 // Counts leave duration in days (excludes weekends + MU holidays)
 export function leaveDurationDays(alloc: Allocation): number {
   if (!alloc.startDate || !alloc.endDate) return 0
